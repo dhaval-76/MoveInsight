@@ -1,18 +1,19 @@
 """C3 — Benchmarking / context engine.
 
-Wraps any bare KPI value from C2 with the four reference points the brief names
-as the missing capability: historical trend, SLA/goal, peer comparison, and
-industry norm — plus drivers-of-change attribution and a good/bad verdict.
+For OTA, returns a grouped benchmark contract that C4 can scan directly:
 
-Pure deterministic math over DuckDB. No LLM. Returns one "context object" that
-every downstream consumer (dashboard badges, briefing prose, escalation
-evidence, impact ranking) reads from.
+    {kpi, tenant_id, period, grain, overall, groups[]}
+
+For the remaining KPIs, retains the richer generic context object with trend,
+SLA, peer, industry, and attribution fields for future expansion.
+
+Pure deterministic math over DuckDB. No LLM.
 
 Usage:
     from backend.metrics import Metrics
     from backend.context import ContextEngine
     ce = ContextEngine(Metrics("backend/mobility.duckdb"))
-    ce.context("ota", {"vendor": "Pooja Mikhailov Travel"}, period="2026-07")
+    ce.context("ota", {"tenant_id": "pinnacle-Slc"}, period="2026-07")
 """
 from __future__ import annotations
 from typing import Optional
@@ -44,6 +45,8 @@ class ContextEngine:
             buckets = self.m.periods(grain, filters)
             period = buckets[-1] if buckets else None
         reg = C.METRIC_REGISTRY[kpi]
+        if kpi == "ota":
+            return self.ota_benchmark(filters, period, grain)
         method = reg["method"]
         good_up = reg["good"] == "up"
 
@@ -70,6 +73,52 @@ class ContextEngine:
         ctx["assessment"] = self._assess(ctx, good_up)
         ctx["headline"] = self._headline(ctx)
         return ctx
+
+    def ota_benchmark(self, filters: Optional[dict] = None,
+                      period: Optional[str] = None,
+                      grain: str = "month",
+                      dimension: str = "vendor") -> dict:
+        """Return the OTA benchmark contract consumed by C4.
+
+        The output keeps all grouped OTA facts for the requested tenant/scope so
+        C4 can decide which groups are anomalous without C3 trimming evidence.
+        """
+        filters = dict(filters or {})
+        if period is None:
+            buckets = self.m.periods(grain, filters)
+            period = buckets[-1] if buckets else None
+
+        overall = self.m.ota(filters, period, grain)
+        overall_sla = self._ota_sla_target(filters)
+        groups = []
+        for group in self.m.kpi_by_group("ota", dimension, filters, period, grain, min_n=1):
+            group_filters = dict(filters)
+            group_filters[dimension] = group["group"]
+            sla = self._ota_sla_target(group_filters)
+            gap = None if group["value"] is None else round(group["value"] - sla, 2)
+            groups.append({
+                "dimension": dimension,
+                "name": group["group"],
+                "value": group["value"],
+                "n": group["n"],
+                "sla_gap_pts": gap,
+                "breached": None if gap is None else gap < 0,
+            })
+
+        groups.sort(key=lambda g: (g["breached"] is not True, g["sla_gap_pts"] or 0, -g["n"]))
+        return {
+            "kpi": "ota",
+            "tenant_id": filters.get("tenant_id"),
+            "scope": filters,
+            "period": period,
+            "grain": grain,
+            "overall": {
+                "value": overall.get("value"),
+                "n": overall.get("n"),
+                "sla": overall_sla,
+            },
+            "groups": groups,
+        }
 
     # -- 1. historical trend ---------------------------------------------------
 
@@ -103,21 +152,26 @@ class ContextEngine:
     def _sla(self, kpi, reg, filters, value, good_up):
         target = reg.get("sla")
         if kpi == "ota" and filters:
-            tenant_id = filters.get("tenant_id")
-            vendor = filters.get("vendor")
-            target_frac = None
-            if vendor is not None:
-                target_frac = C.VENDOR_OTA_SLA.get((tenant_id, vendor))
-                target_frac = target_frac or C.VENDOR_OTA_SLA.get((None, vendor))
-            if target_frac is None and tenant_id is not None:
-                target_frac = C.TENANT_OTA_SLA.get(tenant_id)
-            if target_frac is not None:
-                target = target_frac * 100
+            target = self._ota_sla_target(filters)
         if target is None or value is None:
             return {"target": target, "gap_pts": None, "breached": None}
         gap = round(value - target, 2)                 # signed
         breached = gap < 0 if good_up else gap > 0     # polarity-aware
         return {"target": target, "gap_pts": gap, "breached": breached}
+
+    def _ota_sla_target(self, filters):
+        filters = filters or {}
+        tenant_id = filters.get("tenant_id")
+        vendor = filters.get("vendor")
+        target_frac = None
+        if vendor is not None:
+            target_frac = C.VENDOR_OTA_SLA.get((tenant_id, vendor))
+            target_frac = target_frac or C.VENDOR_OTA_SLA.get((None, vendor))
+        if target_frac is None and tenant_id is not None:
+            target_frac = C.TENANT_OTA_SLA.get(tenant_id)
+        if target_frac is None:
+            target_frac = C.DEFAULT_OTA_SLA
+        return round(target_frac * 100, 2)
 
     # -- 3. peer comparison ----------------------------------------------------
 

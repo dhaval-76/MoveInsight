@@ -7,8 +7,8 @@ Verifies:
   C1  the canonical DuckDB exists and the 7 tables are populated & joinable.
   C2  every whitelisted KPI returns a sane value; the safe-query guard blocks
       illegal dimensions.
-  C3  the context engine produces a well-formed context object for every KPI,
-      with all four reference points + drivers + headline.
+  C3  the context engine produces the grouped OTA benchmark contract and keeps
+      the generic benchmark object healthy for the other KPIs.
 
 Exits non-zero on the first hard failure so it can gate a demo.
 """
@@ -85,40 +85,38 @@ def test_c2(m: Metrics):
 # --------------------------------------------------------------------------- C3
 REQUIRED_KEYS = {"kpi", "label", "value", "trend", "sla", "peer", "industry",
                  "drivers_of_change", "assessment", "headline"}
+OTA_REQUIRED_KEYS = {"kpi", "tenant_id", "period", "grain", "overall", "groups"}
 
 
 def test_c3(ce: ContextEngine):
     print("\nC3  context engine (benchmarking)")
     for kpi in C.METRIC_REGISTRY:
         ctx = ce.context(kpi, {"tenant_id": TENANT}, MONTH)
-        missing = REQUIRED_KEYS - set(ctx)
-        good = not missing and isinstance(ctx["trend"]["series"], list) \
-            and len(ctx["trend"]["series"]) == len(C.DATA_MONTHS) \
-            and isinstance(ctx["headline"], str) and ctx["headline"].endswith(".")
+        required = OTA_REQUIRED_KEYS if kpi == "ota" else REQUIRED_KEYS
+        missing = required - set(ctx)
+        if kpi == "ota":
+            good = not missing and isinstance(ctx["groups"], list) \
+                and len(ctx["groups"]) >= 1 and "sla_gap_pts" in ctx["groups"][0]
+        else:
+            good = not missing and isinstance(ctx["trend"]["series"], list) \
+                and len(ctx["trend"]["series"]) == len(C.DATA_MONTHS) \
+                and isinstance(ctx["headline"], str) and ctx["headline"].endswith(".")
         check(f"context('{kpi}') well-formed", good,
-              (f"missing {missing}" if missing else f"assess={ctx['assessment']}"))
+              (f"missing {missing}" if missing else "ok"))
 
     # spotlight one full object
-    print("\n  sample headline (ota, whole tenant):")
-    print("   ", ce.context("ota", {"tenant_id": TENANT}, MONTH)["headline"])
+    print("\n  sample OTA benchmark (whole tenant):")
+    ota = ce.context("ota", {"tenant_id": TENANT}, MONTH)
+    print("   ", f"overall={ota['overall']['value']}%, groups={len(ota['groups'])}")
 
-    # drivers should attribute when NOT filtered to a single vendor
-    d = ce.context("ota", {"tenant_id": TENANT}, MONTH)["drivers_of_change"]
-    check("drivers_of_change populated at tenant scope", len(d) >= 1,
-          f"{len(d)} drivers, top={d[0]['label'] if d else '-'}")
-
-    # ...and be empty when the filter already pins that dim
-    one_vendor = d[0]["label"] if d else "Pooja Mikhailov Travel"
-    d2 = ce.context("ota", {"tenant_id": TENANT, "vendor": one_vendor}, MONTH)["drivers_of_change"]
-    check("drivers empty when vendor is pinned", d2 == [], f"{len(d2)} drivers")
+    check("OTA benchmark returns all eligible vendor groups", len(ota["groups"]) >= 10,
+          f"{len(ota['groups'])} groups")
 
     # weekly grain gives a richer trend series derived from the data
     wk = ce.context("ota", {"tenant_id": TENANT}, period="2026-W29", grain="week")
-    check("weekly grain yields > monthly points",
-          len(wk["trend"]["series"]) > len(C.DATA_MONTHS),
-          f"{len(wk['trend']['series'])} weekly buckets")
-    check("weekly headline says 'last week'", "last week" in wk["headline"],
-          wk["headline"][:60] + "...")
+    check("weekly grain returns grouped benchmark",
+          wk["grain"] == "week" and len(wk["groups"]) >= 1,
+          f"{len(wk['groups'])} weekly groups")
 
 
 def main():

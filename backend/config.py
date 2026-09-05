@@ -115,6 +115,11 @@ DEFAULT_GRAIN = "month"
 # C4 consumes C3 context objects. It does not reason like an LLM; it evaluates
 # configured thresholds and produces repeatable signals + priority scores.
 C4_MIN_SAMPLE_SIZE = 200
+C4_OTA_MIN_SAMPLE_BY_GRAIN = {
+    "day": 20,
+    "week": 100,
+    "month": 200,
+}
 C4_ANOMALY_SCORE_THRESHOLD = 50
 C4_PRIORITY_BANDS = {
     "critical": 85,
@@ -178,6 +183,25 @@ DATA_DIR = os.environ.get(
     "MOVEINSYNC_DATA_DIR",
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 )
+
+# --- C5 lightweight reasoning config -----------------------------------------
+#
+# Groq exposes an OpenAI-compatible API. Prefer the environment for secrets.
+# For demo-only local runs, GROQ_API_KEY can be filled directly below; do not
+# commit a real key.
+GROQ_API_KEY = ""
+GROQ_API_KEY_ENV = "GROQ_API_KEY"
+GROQ_API_BASE_URL = os.environ.get(
+    "GROQ_API_BASE_URL",
+    "https://api.groq.com/openai/v1",
+)
+GROQ_REASONING_MODEL = os.environ.get(
+    "GROQ_REASONING_MODEL",
+    "openai/gpt-oss-20b",
+)
+GROQ_TIMEOUT_SECONDS = float(os.environ.get("GROQ_TIMEOUT_SECONDS", "20"))
+GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", "700"))
+GROQ_TEMPERATURE = float(os.environ.get("GROQ_TEMPERATURE", "0.2"))
 
 # Raw file names (the thin adapter: change these + the column map in ingest.py
 # if the real schema shifts).
