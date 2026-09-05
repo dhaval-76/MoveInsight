@@ -1,4 +1,4 @@
-# C1 + C2 — Data Ingestion & Metrics Layer
+# C1 + C2 + C3 — Ingestion, Metrics & Context Layer
 
 Deterministic foundation for the Agentic Intelligence & Reporting Layer.
 See `../HLD_v2.md` for the full design. **All math lives here; the LLM never
@@ -8,9 +8,10 @@ computes a KPI.**
 
 ```
 backend/
-  config.py    SLA targets, emission factors, thresholds, file names (the tunable knobs)
+  config.py    SLA targets, emission factors, thresholds, file names + METRIC_REGISTRY (the tunable knobs)
   ingest.py    C1 — load 7 CSVs -> clean canonical DuckDB (ID/date/cost/severity normalization)
   metrics.py   C2 — whitelisted KPI functions (safe query interface for the agent + dashboard)
+  context.py   C3 — benchmarking/context engine (trend + SLA + peer + industry + drivers)
 ```
 
 ## Setup
@@ -22,19 +23,28 @@ python -m pip install --upgrade pip
 pip install -r backend/requirements.txt
 ```
 
-## Run the context API
+## Build the database (from the repo root, where the CSVs live)
+
+```bash
+python -m backend.ingest
+# -> backend/mobility.duckdb  (built in ~4s over ~3M rows)
+```
+
+## Run the context API (FastAPI)
 
 ```bash
 source backend/.venv/bin/activate
 uvicorn backend.api:app --reload
 ```
 
-DuckDB allows the API to read the database only when another application does
-not hold a write lock. Close the `mobility.duckdb` connection in DBeaver (or
-other database clients) before starting Uvicorn. If the lock error mentions a
-stale client process, fully quit that client and start Uvicorn again.
+Interactive docs at `http://127.0.0.1:8000/docs`.
 
-The API exposes one endpoint, `POST /context`:
+> **DuckDB write-lock:** the API can read the database only when no other
+> application holds a write lock. Close the `mobility.duckdb` connection in
+> DBeaver / the DuckDB CLI before starting Uvicorn. If the lock error mentions a
+> stale client, fully quit that client and start Uvicorn again.
+
+Primary endpoint — `POST /context`:
 
 ```json
 {
@@ -44,16 +54,9 @@ The API exposes one endpoint, `POST /context`:
 }
 ```
 
-The response is the full context object produced by `ContextEngine`, including
-the current value, sample size, trend, SLA, peer comparison, industry norm,
-drivers of change, assessment, and headline.
-
-## Build the database (from the repo root, where the CSVs live)
-
-```bash
-python -m backend.ingest
-# -> backend/mobility.duckdb  (built in ~4s over ~3M rows)
-```
+The response is the full context object produced by `ContextEngine` — value,
+sample size, trend, SLA, peer comparison, industry norm, drivers of change,
+assessment, and headline.
 
 ## Use the metrics layer
 
@@ -69,6 +72,30 @@ m.ota_by_vendor(tenant_id="pinnacle-Slc") # volume-normalized peer ranking (feed
 m.ota_trend()                             # month-over-month (feeds C3 trend context)
 m.data_health("pinnacle-Slc")            # graceful-degradation panel
 ```
+
+## Use the context engine (C3)
+
+Wraps any KPI in benchmarking context — the "so what" layer that feeds C4/C6.
+
+```python
+from backend.context import ContextEngine
+c = ContextEngine("backend/mobility.duckdb")
+
+ctx = c.context("ota", {"tenant_id": "pinnacle-Slc"}, month="2026-07")
+ctx["headline"]      # pre-composed, numbers-only sentence (zero hallucination risk)
+ctx["assessment"]    # "|"-joined flags: sla_breached|declining|bottom_quartile_peer|below_industry_norm, or "healthy"
+```
+
+Each context object bundles **4 reference points** around the raw value:
+
+1. `trend` — month-over-month series, moving avg, polarity-aware `improving` flag
+2. `sla` — signed `gap_pts` vs target + `breached`
+3. `peer` — volume-normalized rank/percentile + best/median/worst spread
+4. `industry`— delta vs configured industry norm
+
+Plus `drivers_of_change[]` — weighted attribution of which vendors/offices move the
+number, ranked by `contribution_pct`. See `./backend/sample_context.json` for full examples
+(this is the locked contract for `GET /api/context/{kpi}`).
 
 ## Canonical tables
 
@@ -96,5 +123,6 @@ whitelisted set of filter dimensions (`ALLOWED_DIMS`). Illegal dimensions raise
 
 ## Notes for the other workstreams
 
-- **C3 (benchmarking)** consumes `ota_by_vendor`, `ota_trend`, and per-filter KPI values to build the context object.
-- **C8 (dashboard/chat)** reads the same `Metrics` functions — one source of truth.
+- **C3 (benchmarking)** is built — `context.py` consumes the `Metrics` helpers (`distinct`, `kpi_by_group`, trends) to produce the context object per KPI.
+- **C4 (detection/ranking)** consumes C3 context objects; ranks by business impact.
+- **C8 (dashboard/chat)** reads the same `Metrics`/`ContextEngine` functions — one source of truth.
