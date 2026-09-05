@@ -195,7 +195,7 @@ ENABLE_REASONING = os.environ.get("ENABLE_REASONING", "true").strip().lower() in
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY", "")
 GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "meta-llama/llama-prompt-guard-2-86m")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 
 # Backward compatibility aliases
 GROK_API_KEY = GROQ_API_KEY
@@ -232,7 +232,7 @@ GROQ_REASONING_MODEL = os.environ.get(
     "GROQ_REASONING_MODEL", GROQ_MODEL
 )
 GROQ_TIMEOUT_SECONDS = float(os.environ.get("GROQ_TIMEOUT_SECONDS", "20"))
-GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", "700"))
+GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", "1600"))
 GROQ_TEMPERATURE = float(os.environ.get("GROQ_TEMPERATURE", "0.2"))
 
 # Raw file names (the thin adapter: change these + the column map in ingest.py
@@ -246,5 +246,3 @@ EMP_FILE = "emp_Data.csv"
 BILL_FILE = "bill_data.csv"
 FEEDBACK_FILE = "trip_feedback.csv"
 ALERTS_FILE = "alerts_data.csv"
-
-

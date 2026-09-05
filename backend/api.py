@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from .agent import AgentOrchestrator
 from .alerts import AlertStore
+from . import config as C
 from .context import ContextEngine
 from .insights import InsightEngine
 from .metrics import Metrics
@@ -85,7 +86,14 @@ class AlertStatusRequest(BaseModel):
 app = FastAPI(title="MoveInsight Context, Insights & Agent API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:4173", "http://localhost:4174", "http://127.0.0.1:4173", "http://127.0.0.1:4174"],
+    allow_origins=[
+        "http://localhost:4173",
+        "http://localhost:4174",
+        "http://localhost:4175",
+        "http://127.0.0.1:4173",
+        "http://127.0.0.1:4174",
+        "http://127.0.0.1:4175",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -182,6 +190,7 @@ def reason_about_ota(request: ContextRequest) -> dict:
             "status": reasoning["status"],
             "period": context.get("period"),
             "grain": context.get("grain"),
+            "scope": context.get("scope") or request.filters or {},
             "c4_alerts": insights,
             "total_alerts": reasoning["total_alerts"],
             "results": reasoning["results"],
@@ -234,10 +243,14 @@ def list_alerts(tenant_id: Optional[str] = None, status: Optional[str] = None) -
 
 
 @app.get("/alerts/periods")
-def list_alert_periods() -> dict:
-    """Return available completed periods and the latest month."""
-    periods = _metrics.periods(grain="month")
-    return {"periods": periods, "latest_period": periods[-1] if periods else None}
+def list_alert_periods(grain: Literal["month", "week", "day"] = "month") -> dict:
+    """Return available completed periods for the requested grain."""
+    periods = _metrics.periods(grain=grain)
+    return {
+        "grain": grain,
+        "periods": periods,
+        "latest_period": periods[-1] if periods else None,
+    }
 
 
 @app.patch("/alerts/{alert_id}/status")
@@ -254,6 +267,11 @@ def run_alert_pipeline(request: AlertRunRequest) -> dict:
     """Run C3 -> C4 -> C5 for every tenant aggregate and persist anomalies."""
     run_id, _ = _alert_store.start_run(request.period, request.grain)
     try:
+        reasoning_enabled = (
+            C.ENABLE_REASONING
+            if request.enable_reasoning is None
+            else request.enable_reasoning
+        )
         anomalies = _insight_engine.scan_period(
             request.period,
             grain=request.grain,
@@ -262,18 +280,18 @@ def run_alert_pipeline(request: AlertRunRequest) -> dict:
         )
         ota_anomalies = [anomaly for anomaly in anomalies if anomaly.get("kpi") == "ota"]
         ota_reasoning = None
-        if ota_anomalies and request.enable_reasoning:
+        if ota_anomalies and reasoning_enabled:
             try:
                 ota_reasoning = _ota_reasoning_agent.reason_many(ota_anomalies)
-            except (AgentConfigurationError, AgentProviderError):
-                ota_reasoning = None
+            except (AgentConfigurationError, AgentProviderError) as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
         saved = []
         for anomaly in anomalies:
             result = _agent_orchestrator.process_anomaly(
                 anomaly,
                 enable_reasoning=(
                     False if ota_reasoning and anomaly.get("kpi") == "ota"
-                    else request.enable_reasoning
+                    else reasoning_enabled
                 ),
             )
             if ota_reasoning:
@@ -286,6 +304,9 @@ def run_alert_pipeline(request: AlertRunRequest) -> dict:
         summary = {"alerts_saved": len(saved), "tenants": sorted({item["tenant_id"] for item in saved})}
         _alert_store.finish_run(run_id, "completed", summary)
         return {"run_id": run_id, **summary, "alerts": saved}
+    except HTTPException:
+        _alert_store.finish_run(run_id, "failed", {"error": "C5 provider request failed"})
+        raise
     except Exception as exc:
         _alert_store.finish_run(run_id, "failed", {"error": str(exc)})
         raise HTTPException(status_code=500, detail=str(exc)) from exc

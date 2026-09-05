@@ -35,7 +35,7 @@ def run_once(
     api_url: str = "http://127.0.0.1:8000",
 ) -> dict:
     """Run the tenant-wide alert pipeline through the running API."""
-    periods = _request_json(api_url, "/alerts/periods")["periods"]
+    periods = _request_json(api_url, f"/alerts/periods?grain={grain}")["periods"]
     if not periods:
         raise RuntimeError(f"No completed {grain} periods are available")
     period = periods[-1]

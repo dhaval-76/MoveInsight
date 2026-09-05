@@ -48,7 +48,24 @@ class AlertStore:
                 recommended_actions_json VARCHAR,
                 context_json VARCHAR,
                 generated_at TIMESTAMP NOT NULL,
-                updated_at TIMESTAMP NOT NULL
+                updated_at TIMESTAMP NOT NULL,
+                c4_confidence VARCHAR,
+                group_dimension VARCHAR,
+                group_name VARCHAR,
+                group_value DOUBLE,
+                group_sample_size BIGINT,
+                group_sla_gap_pts DOUBLE,
+                group_breached BOOLEAN,
+                c5_agent VARCHAR,
+                c5_model VARCHAR,
+                c5_status VARCHAR,
+                c5_reasoning_summary VARCHAR,
+                c5_narrative VARCHAR,
+                c5_recommended_next_step VARCHAR,
+                c5_evidence_used_json VARCHAR,
+                c5_confidence_note VARCHAR,
+                c5_source VARCHAR,
+                c5_insight_json VARCHAR
             )
             """
         )
@@ -97,10 +114,16 @@ class AlertStore:
         summary = agent_result.get("executive_summary") or anomaly.get("summary", "")
         action_draft = agent_result.get("action_draft") or {}
         actions = action_draft.get("actions") or action_draft.get("recommended_actions") or []
+        ota_reasoning = agent_result.get("ota_reasoning") or {}
+        c5_insight = ota_reasoning.get("c4_insight") or anomaly
 
         self.con.execute(
             """
-            INSERT INTO dashboard_alerts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO dashboard_alerts (
+                id, run_id, tenant_id, kpi, period, grain, severity, status,
+                priority_score, priority_band, title, summary, root_cause_json,
+                recommended_actions_json, context_json, generated_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 run_id = excluded.run_id,
                 priority_score = excluded.priority_score,
@@ -132,6 +155,38 @@ class AlertStore:
                 now,
             ],
         )
+        self.con.execute(
+            """
+            UPDATE dashboard_alerts
+            SET c4_confidence = ?, group_dimension = ?, group_name = ?,
+                group_value = ?, group_sample_size = ?, group_sla_gap_pts = ?,
+                group_breached = ?, c5_agent = ?, c5_model = ?, c5_status = ?,
+                c5_reasoning_summary = ?, c5_narrative = ?,
+                c5_recommended_next_step = ?, c5_evidence_used_json = ?,
+                c5_confidence_note = ?, c5_source = ?, c5_insight_json = ?
+            WHERE id = ?
+            """,
+            [
+                anomaly.get("confidence"),
+                group.get("dimension"),
+                group.get("name"),
+                group.get("value"),
+                group.get("n"),
+                group.get("sla_gap_pts"),
+                group.get("breached"),
+                ota_reasoning.get("agent"),
+                ota_reasoning.get("model"),
+                ota_reasoning.get("status") or agent_result.get("status"),
+                ota_reasoning.get("reasoning_summary"),
+                ota_reasoning.get("narrative"),
+                ota_reasoning.get("recommended_next_step"),
+                json.dumps(ota_reasoning.get("evidence_used", [])),
+                ota_reasoning.get("confidence_note"),
+                ota_reasoning.get("source"),
+                json.dumps(c5_insight),
+                alert_id,
+            ],
+        )
         return self.get_alert(alert_id)
 
     def list_alerts(
@@ -153,7 +208,12 @@ class AlertStore:
             SELECT id, run_id, tenant_id, kpi, period, grain, severity, status,
                    priority_score, priority_band, title, summary,
                    root_cause_json, recommended_actions_json, context_json,
-                   generated_at, updated_at
+                   generated_at, updated_at, c4_confidence, group_dimension,
+                   group_name, group_value, group_sample_size, group_sla_gap_pts,
+                   group_breached, c5_agent, c5_model, c5_status,
+                   c5_reasoning_summary, c5_narrative, c5_recommended_next_step,
+                   c5_evidence_used_json, c5_confidence_note, c5_source,
+                   c5_insight_json
             FROM dashboard_alerts {where}
             ORDER BY priority_score DESC NULLS LAST, generated_at DESC
             """,
@@ -186,7 +246,13 @@ class AlertStore:
 
     @staticmethod
     def _decode_alert(alert: dict) -> dict:
-        for key in ("root_cause_json", "recommended_actions_json", "context_json"):
+        for key in (
+            "root_cause_json",
+            "recommended_actions_json",
+            "context_json",
+            "c5_evidence_used_json",
+            "c5_insight_json",
+        ):
             value = alert.pop(key)
             alert[key.removesuffix("_json")] = json.loads(value) if value else {}
         return alert

@@ -177,8 +177,7 @@ function App() {
   const recommendedActions =
     selectedAlert?.recommended_actions?.length ?
       selectedAlert.recommended_actions
-    : otaReasoning?.recommended_next_step ?
-      [otaReasoning.recommended_next_step]
+    : otaReasoning?.recommended_next_step ? [otaReasoning.recommended_next_step]
     : actionDraft ?
       [
         `Route ${actionDraft.type.replaceAll("_", " ")} to ${actionDraft.recipient}.`,
@@ -344,7 +343,9 @@ function App() {
                 <div className='evidence-grid'>
                   <div>
                     <span className='evidence-label'>Group</span>
-                    <strong>{alertGroup.dimension}: {alertGroup.name}</strong>
+                    <strong>
+                      {alertGroup.dimension}: {alertGroup.name}
+                    </strong>
                   </div>
                   <div>
                     <span className='evidence-label'>Observed</span>
@@ -352,7 +353,9 @@ function App() {
                   </div>
                   <div>
                     <span className='evidence-label'>SLA gap</span>
-                    <strong>{alertGroup.sla_gap_pts ?? alertContext.sla?.gap_pts} pts</strong>
+                    <strong>
+                      {alertGroup.sla_gap_pts ?? alertContext.sla?.gap_pts} pts
+                    </strong>
                   </div>
                   <div>
                     <span className='evidence-label'>Confidence</span>
@@ -391,14 +394,22 @@ function App() {
                   <h4>C5 reasoning</h4>
                   {otaReasoning ?
                     <>
-                      <p>{otaReasoning.reasoning_summary || otaReasoning.narrative}</p>
-                      {otaReasoning.confidence_note && <p className='muted'>{otaReasoning.confidence_note}</p>}
+                      <p>
+                        {otaReasoning.reasoning_summary ||
+                          otaReasoning.narrative}
+                      </p>
+                      {otaReasoning.confidence_note && (
+                        <p className='muted'>{otaReasoning.confidence_note}</p>
+                      )}
                     </>
                   : <ul>
                       {reasoningTrace.map(step => (
-                        <li key={`${step.step}-${step.detail}`}>{step.detail}</li>
+                        <li key={`${step.step}-${step.detail}`}>
+                          {step.detail}
+                        </li>
                       ))}
-                    </ul>}
+                    </ul>
+                  }
                 </div>
               )}
 

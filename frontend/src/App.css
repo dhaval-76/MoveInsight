@@ -280,7 +280,7 @@
   margin: 16px 0;
 }
 
-.evidence-grid > div {
+.evidence-grid>div {
   display: flex;
   flex-direction: column;
   gap: 4px;
