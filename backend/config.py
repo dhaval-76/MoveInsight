@@ -4,6 +4,16 @@ These are NOT in the dataset — they are supplied here with stated assumptions,
 per HLD §2.4. Editable per tenant/vendor.
 """
 
+import os
+
+try:
+    from dotenv import load_dotenv
+    _base_dir = os.path.dirname(os.path.abspath(__file__))
+    load_dotenv(os.path.join(_base_dir, ".env"))
+    load_dotenv(os.path.join(os.path.dirname(_base_dir), ".env"))
+except ImportError:
+    pass
+
 # On-time-arrival threshold: a trip is "on time" if delay <= this many minutes.
 OTA_THRESHOLD_MIN = 10
 
@@ -174,17 +184,9 @@ C4_RULES = {
 # Configurable reasoning mode:
 # If ENABLE_REASONING is True: Sense + Reason + Act (root cause investigation, driver breakdown, reasoning trace)
 # If ENABLE_REASONING is False: Sense + Act (direct anomaly-to-action payload without reasoning trace)
-ENABLE_REASONING = True
-
-import os
-try:
-    from dotenv import load_dotenv
-    # Load .env file from project root or backend directory
-    _base_dir = os.path.dirname(os.path.abspath(__file__))
-    load_dotenv(os.path.join(_base_dir, ".env"))
-    load_dotenv(os.path.join(os.path.dirname(_base_dir), ".env"))
-except ImportError:
-    pass
+ENABLE_REASONING = os.environ.get("ENABLE_REASONING", "true").strip().lower() in {
+    "1", "true", "yes", "on",
+}
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY", "")
 GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")

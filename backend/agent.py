@@ -453,7 +453,7 @@ class AgentOrchestrator:
             reason_detail = f"Metric {ctx.get('label')} is currently {value}{unit} over {n:,} trips."
 
         groq_body = None
-        if groq_key:
+        if reasoning_on and groq_key:
             prompt = (
                 f"Draft an urgent operational action notification ({action_type}) for recipient '{recipient}'.\n"
                 f"Data: KPI {ctx.get('label')} is {value}{unit} against target SLA {ctx.get('sla', {}).get('target')}{unit}.\n"

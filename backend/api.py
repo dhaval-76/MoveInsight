@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .agent import AgentOrchestrator
+from .alerts import AlertStore
 from .context import ContextEngine
 from .insights import InsightEngine
 from .metrics import Metrics
@@ -65,13 +67,34 @@ class AgentQueryRequest(BaseModel):
     grain: Literal["month", "week", "day"] = "month"
 
 
+class AlertRunRequest(BaseModel):
+    """Tenant-wide daily alert pipeline options."""
+
+    period: str = Field(min_length=1, description="Completed period, for example 2026-07")
+    grain: Literal["month", "week", "day"] = "month"
+    enable_reasoning: Optional[bool] = None
+
+
+class AlertStatusRequest(BaseModel):
+    """Allowed dashboard workflow status transition."""
+
+    status: Literal["new", "acknowledged", "resolved", "dismissed"]
+
+
 app = FastAPI(title="MoveInsight Context, Insights & Agent API", version="1.0.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:4173", "http://localhost:4174", "http://127.0.0.1:4173", "http://127.0.0.1:4174"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _db_path = str(Path(__file__).with_name("mobility.duckdb"))
 _metrics = Metrics(_db_path)
 _context_engine = ContextEngine(_metrics)
 _insight_engine = InsightEngine(_context_engine)
 _agent_orchestrator = AgentOrchestrator(_context_engine, _insight_engine)
+_alert_store = AlertStore(_db_path)
 
 
 @app.post("/context")
@@ -165,4 +188,53 @@ def process_query(request: AgentQueryRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/alerts")
+def list_alerts(tenant_id: Optional[str] = None, status: Optional[str] = None) -> list[dict]:
+    """Return persisted C5 alerts for the shared dashboard."""
+    return _alert_store.list_alerts(tenant_id=tenant_id, status=status)
+
+
+@app.get("/alerts/periods")
+def list_alert_periods() -> dict:
+    """Return available completed periods and the latest month."""
+    periods = _metrics.periods(grain="month")
+    return {"periods": periods, "latest_period": periods[-1] if periods else None}
+
+
+@app.patch("/alerts/{alert_id}/status")
+def update_alert_status(alert_id: str, request: AlertStatusRequest) -> dict:
+    """Update the workflow status of one persisted alert."""
+    try:
+        return _alert_store.update_status(alert_id, request.status)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/alerts/run")
+def run_alert_pipeline(request: AlertRunRequest) -> dict:
+    """Run C3 -> C4 -> C5 for every tenant aggregate and persist anomalies."""
+    run_id, _ = _alert_store.start_run(request.period, request.grain)
+    try:
+        anomalies = _insight_engine.scan_period(
+            request.period,
+            grain=request.grain,
+            tenant_id=None,
+            dimensions=[],
+        )
+        saved = []
+        for anomaly in anomalies:
+            result = _agent_orchestrator.process_anomaly(
+                anomaly,
+                enable_reasoning=request.enable_reasoning,
+            )
+            saved.append(_alert_store.save_alert(run_id, anomaly, result))
+
+        summary = {"alerts_saved": len(saved), "tenants": sorted({item["tenant_id"] for item in saved})}
+        _alert_store.finish_run(run_id, "completed", summary)
+        return {"run_id": run_id, **summary, "alerts": saved}
+    except Exception as exc:
+        _alert_store.finish_run(run_id, "failed", {"error": str(exc)})
         raise HTTPException(status_code=500, detail=str(exc)) from exc

@@ -32,10 +32,57 @@ Create a `.env` file in the project root or `backend/` directory (or copy from `
 # Groq LLM Reasoning Configuration
 GROQ_API_KEY=your_groq_api_key_here
 GROQ_BASE_URL=https://api.groq.com/openai/v1
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-20b
+ENABLE_REASONING=true
+MOVEINSIGHT_API_URL=http://127.0.0.1:8000
 ```
 
 The system automatically loads `GROQ_API_KEY` from `.env` using `python-dotenv`. If no key is set, MoveInsight operates cleanly with deterministic fallback narration.
+
+## Run the alert pipeline manually
+
+Start the API first:
+
+```bash
+cd /path/to/MoveInsight
+backend/.venv/bin/python -m uvicorn backend.api:app --host 0.0.0.0 --port 8000
+```
+
+Then run one tenant-wide pipeline execution. The scheduler discovers the latest
+completed period and calls the API; it does not open a second DuckDB connection:
+
+```bash
+backend/.venv/bin/python -m backend.scheduler --once
+```
+
+The command logs the selected period, API URL, run ID, alert count, tenant count,
+and any failure. Reasoning follows `ENABLE_REASONING` from `.env`. To override it
+for one run:
+
+```bash
+backend/.venv/bin/python -m backend.scheduler --once --disable-reasoning
+backend/.venv/bin/python -m backend.scheduler --once --enable-reasoning
+```
+
+## Run the pipeline daily with cron
+
+Keep the FastAPI service running, then edit the crontab with `crontab -e` and add
+this daily 02:00 job. Replace `/path/to/MoveInsight` with the absolute repository
+path:
+
+```cron
+0 2 * * * cd /path/to/MoveInsight && mkdir -p logs && backend/.venv/bin/python -m backend.scheduler --once >> logs/moveinsight-scheduler.log 2>&1
+```
+
+Inspect scheduler activity with:
+
+```bash
+tail -f logs/moveinsight-scheduler.log
+```
+
+Healthy runs include `Starting alert pipeline` followed by `Alert run ... completed`.
+Failures include a traceback and `Scheduled alert pipeline failed` when using the
+long-running mode. Cron failures are also captured in the redirected log file.
 
 ## Build the database (from the repo root, where the CSVs live)
 

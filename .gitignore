@@ -118,6 +118,9 @@ ipython_config.py
 # pdm.lock
 # pdm.toml
 .pdm-python
+
+# DuckDB runtime write-ahead logs
+*.duckdb.wal
 .pdm-build/
 
 # pixi

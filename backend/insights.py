@@ -62,8 +62,8 @@ class InsightEngine:
                     dimensions: Optional[list[str]] = None,
                     include_global: bool = False) -> list[dict]:
         """Scan tenant and dimension scopes for a period; return ranked anomalies."""
-        kpis = kpis or list(C.METRIC_REGISTRY)
-        dimensions = dimensions or ["vendor", "office"]
+        kpis = list(C.METRIC_REGISTRY) if kpis is None else kpis
+        dimensions = ["vendor", "office"] if dimensions is None else dimensions
         scopes = self._period_scopes(period, grain, tenant_id, dimensions, include_global)
 
         insights = []

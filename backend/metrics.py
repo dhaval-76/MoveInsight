@@ -19,7 +19,7 @@ ALLOWED_DIMS = {"tenant_id", "vendor", "office", "mode", "shift_type", "directio
 
 class Metrics:
     def __init__(self, db_path: str):
-        self.con = duckdb.connect(db_path, read_only=True)
+        self.con = duckdb.connect(db_path)
 
     # -- internal: build a safe WHERE clause from whitelisted dims -------------
     def _where(self, filters: Optional[dict], period: Optional[str] = None,
