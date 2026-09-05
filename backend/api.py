@@ -44,10 +44,6 @@ class ProcessAnomalyRequest(BaseModel):
         default=None,
         description="Override reasoning mode (True: Sense+Reason+Act, False: Sense+Act)",
     )
-    grok_api_key: Optional[str] = Field(
-        default=None,
-        description="Optional Grok (xAI) API Key override",
-    )
 
 
 class ScanAgentRequest(BaseModel):
@@ -57,10 +53,6 @@ class ScanAgentRequest(BaseModel):
     grain: Literal["month", "week", "day"] = "month"
     tenant_id: Optional[str] = None
     enable_reasoning: Optional[bool] = None
-    grok_api_key: Optional[str] = Field(
-        default=None,
-        description="Optional Grok (xAI) API Key override",
-    )
 
 
 class AgentQueryRequest(BaseModel):
@@ -68,11 +60,9 @@ class AgentQueryRequest(BaseModel):
 
     query: str = Field(min_length=1, description="User question e.g. Why did OTA drop?")
     tenant_id: Optional[str] = None
+    period: Optional[str] = Field(default=None, description="Focus period e.g. 2026-07 or 2026-W29")
     month: str = Field(default="2026-07", description="Target month YYYY-MM")
-    grok_api_key: Optional[str] = Field(
-        default=None,
-        description="Optional Grok (xAI) API Key override",
-    )
+    grain: Literal["month", "week", "day"] = "month"
 
 
 app = FastAPI(title="MoveInsight Context, Insights & Agent API", version="1.0.0")
@@ -131,13 +121,17 @@ def scan_insights(request: InsightScanRequest) -> list[dict]:
 
 @app.post("/agent/process-anomaly")
 def process_anomaly(request: ProcessAnomalyRequest) -> dict:
-    """Process a C4 anomaly insight into an action payload and reasoning trace."""
+    """Process a C4 anomaly insight into an action payload and reasoning trace.
+
+    Groq API Key is loaded automatically from server environment / .env file.
+    """
     try:
         return _agent_orchestrator.process_anomaly(
             request.anomaly,
             enable_reasoning=request.enable_reasoning,
-            grok_api_key=request.grok_api_key,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -151,8 +145,9 @@ def scan_and_process(request: ScanAgentRequest) -> list[dict]:
             grain=request.grain,
             tenant_id=request.tenant_id,
             enable_reasoning=request.enable_reasoning,
-            grok_api_key=request.grok_api_key,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -164,8 +159,10 @@ def process_query(request: AgentQueryRequest) -> dict:
         return _agent_orchestrator.process_query(
             request.query,
             tenant_id=request.tenant_id,
-            month=request.month,
-            grok_api_key=request.grok_api_key,
+            period=request.period or request.month,
+            grain=request.grain,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

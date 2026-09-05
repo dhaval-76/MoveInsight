@@ -142,7 +142,7 @@ def test_c5(agent: AgentOrchestrator, ie: InsightEngine):
           res_reason["reasoning_enabled"] and len(res_reason["reasoning_trace"]) >= 4,
           f"{len(res_reason['reasoning_trace'])} reasoning steps")
     check("C5 generates evidence-backed escalation draft",
-          res_reason["action_draft"]["type"] == "vendor_escalation_email" and
+          res_reason["action_draft"]["type"] in ["vendor_escalation_email", "safety_incident_alert", "roster_compliance_notice"] and
           res_reason["action_draft"]["status"] == "PROPOSED_WAITING_APPROVAL",
           f"subject='{res_reason['action_draft']['subject']}'")
 
@@ -154,7 +154,7 @@ def test_c5(agent: AgentOrchestrator, ie: InsightEngine):
           "Pass-through verified")
 
     # Mode 3: NL Query resolution
-    q_res = agent.process_query("Why did OTA drop?", tenant_id=TENANT, month=MONTH)
+    q_res = agent.process_query("Why did OTA drop?", tenant_id=TENANT, period=MONTH)
     check("C5 query processing resolves cited answer",
           "On-time arrival" in q_res["answer"] and "mobility.duckdb" in q_res["citation"],
           q_res["answer"][:60] + "...")

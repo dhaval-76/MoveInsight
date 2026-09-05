@@ -176,11 +176,24 @@ C4_RULES = {
 # If ENABLE_REASONING is False: Sense + Act (direct anomaly-to-action payload without reasoning trace)
 ENABLE_REASONING = True
 
-# Grok (xAI) LLM Reasoning Configuration
 import os
-GROK_API_KEY = os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY", "")
-GROK_BASE_URL = os.environ.get("GROK_BASE_URL", "https://api.x.ai/v1")
-GROK_MODEL = os.environ.get("GROK_MODEL", "grok-2-latest")
+try:
+    from dotenv import load_dotenv
+    # Load .env file from project root or backend directory
+    _base_dir = os.path.dirname(os.path.abspath(__file__))
+    load_dotenv(os.path.join(_base_dir, ".env"))
+    load_dotenv(os.path.join(os.path.dirname(_base_dir), ".env"))
+except ImportError:
+    pass
+
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY", "")
+GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+# Backward compatibility aliases
+GROK_API_KEY = GROQ_API_KEY
+GROK_BASE_URL = GROQ_BASE_URL
+GROK_MODEL = GROQ_MODEL
 
 # Persona routing rules based on priority bands and KPI domain
 PERSONA_ROUTING = {
@@ -191,14 +204,14 @@ PERSONA_ROUTING = {
 }
 
 # Path to the persistent DuckDB file.
-DB_PATH = "mobility.duckdb"
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mobility.duckdb")
 
-# Data directory (where the raw CSVs live).
 import os
-DATA_DIR = os.environ.get(
-    "MOVEINSYNC_DATA_DIR",
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-)
+_default_input_data = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "input_data"))
+_fallback_data = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_data_dir_default = _default_input_data if os.path.exists(_default_input_data) else _fallback_data
+
+DATA_DIR = os.environ.get("MOVEINSYNC_DATA_DIR", _data_dir_default)
 
 # Raw file names (the thin adapter: change these + the column map in ingest.py
 # if the real schema shifts).

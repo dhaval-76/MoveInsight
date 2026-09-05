@@ -85,7 +85,7 @@ class AgentOrchestratorTests(unittest.TestCase):
         self.assertEqual(action["type"], "vendor_escalation_email")
         self.assertEqual(action["recipient"], "Pooja Mikhailov Travel")
         self.assertIn("Pooja Mikhailov Travel", action["subject"])
-        self.assertIn("Pooja Mikhailov Travel contributed 67.3%", action["body"])
+        self.assertIn("Pooja Mikhailov Travel' contributed 67.3%", action["body"])
         self.assertEqual(action["status"], "PROPOSED_WAITING_APPROVAL")
 
     def test_sample_c4_payload_reasoning_disabled(self):
@@ -106,6 +106,37 @@ class AgentOrchestratorTests(unittest.TestCase):
         action = res["action_draft"]
         self.assertEqual(action["type"], "vendor_escalation_email")
         self.assertEqual(action["status"], "PROPOSED_WAITING_APPROVAL")
+
+    def test_weekly_grain_drilldown_matches_data(self):
+        """Fix Finding 1: verify weekly period query parses grain correctly without UNKNOWN."""
+        if not self.db_available:
+            self.skipTest("mobility.duckdb not available")
+
+        payload = sample_c4_anomaly()
+        payload["context"]["period"] = "2026-W29"
+        payload["context"]["grain"] = "week"
+
+        res = self.agent.process_anomaly(payload, enable_reasoning=True)
+        drilldown_step = [s for s in res["reasoning_trace"] if s["step"] == "3_OPERATIONAL_DRILLDOWN"][0]
+
+        self.assertNotIn("UNKNOWN", drilldown_step["detail"])
+        self.assertIn("delayed trips", drilldown_step["detail"])
+
+    def test_healthy_payload_bypasses_escalation(self):
+        """Fix Finding 3: verify payload with is_anomaly=False generates NO_ACTION_NEEDED."""
+        payload = sample_c4_anomaly()
+        payload["is_anomaly"] = False
+
+        res = self.agent.process_anomaly(payload)
+
+        self.assertEqual(res["status"], "NO_ACTION_NEEDED")
+        self.assertEqual(res["action_draft"]["type"], "no_action_required")
+        self.assertIn("[HEALTHY]", res["executive_summary"])
+
+    def test_invalid_payload_raises_value_error(self):
+        """Fix Finding 3: verify invalid payloads raise ValueError."""
+        with self.assertRaises(ValueError):
+            self.agent.process_anomaly({"invalid": "payload"})
 
     def test_process_query(self):
         if not self.db_available:

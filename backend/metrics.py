@@ -48,7 +48,7 @@ class Metrics:
         return sql, params
 
     def _scalar(self, sql, params):
-        return self.con.execute(sql, params).fetchone()
+        return self.con.cursor().execute(sql, params).fetchone()
 
     # -- KPIs ------------------------------------------------------------------
 

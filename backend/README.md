@@ -24,6 +24,19 @@ python -m pip install --upgrade pip
 pip install -r backend/requirements.txt
 ```
 
+### Environment Configuration (.env)
+
+Create a `.env` file in the project root or `backend/` directory (or copy from `.env.example`):
+
+```env
+# Groq LLM Reasoning Configuration
+GROQ_API_KEY=your_groq_api_key_here
+GROQ_BASE_URL=https://api.groq.com/openai/v1
+GROQ_MODEL=llama-3.3-70b-versatile
+```
+
+The system automatically loads `GROQ_API_KEY` from `.env` using `python-dotenv`. If no key is set, MoveInsight operates cleanly with deterministic fallback narration.
+
 ## Build the database (from the repo root, where the CSVs live)
 
 ```bash
