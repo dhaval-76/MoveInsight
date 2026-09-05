@@ -18,7 +18,7 @@ backend/
 ```bash
 python3 -m venv ./backend/.venv
 source ./backend/.venv/bin/activate
-python -m pip install --upgrade pip 
+python -m pip install --upgrade pip
 pip install -r backend/requirements.txt
 ```
 
