@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Optional
 import duckdb
 
-from . import config as C
+from .. import config as C
 
 # Whitelisted dimensions an LLM/tool is allowed to filter on.
 ALLOWED_DIMS = {"tenant_id", "vendor", "office", "mode", "shift_type", "direction"}

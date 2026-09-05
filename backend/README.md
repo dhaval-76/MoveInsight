@@ -6,7 +6,7 @@ computes a KPI.**
 
 ## Layout
 ```
-app/
+backend/
   config.py    SLA targets, emission factors, thresholds, file names (the tunable knobs)
   ingest.py    C1 — load 7 CSVs -> clean canonical DuckDB (ID/date/cost/severity normalization)
   metrics.py   C2 — whitelisted KPI functions (safe query interface for the agent + dashboard)
@@ -14,19 +14,22 @@ app/
 
 ## Setup
 ```bash
-pip install -r app/requirements.txt
+python3 -m venv ./backend/.venv
+source ./backend/.venv/bin/activate
+python -m pip install --upgrade pip 
+pip install -r backend/requirements.txt
 ```
 
 ## Build the database (from the repo root, where the CSVs live)
 ```bash
-python -m app.ingest
-# -> app/mobility.duckdb  (built in ~4s over ~3M rows)
+python -m backend.ingest
+# -> backend/mobility.duckdb  (built in ~4s over ~3M rows)
 ```
 
 ## Use the metrics layer
 ```python
-from app.metrics import Metrics
-m = Metrics("app/mobility.duckdb")
+from backend.metrics import Metrics
+m = Metrics("backend/mobility.duckdb")
 
 m.ota()                                   # overall on-time arrival
 m.ota({"vendor": "Pooja Mikhailov Travel"})

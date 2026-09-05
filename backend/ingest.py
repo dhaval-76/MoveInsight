@@ -13,7 +13,7 @@ import os
 import time
 import duckdb
 
-from . import config as C
+from .. import config as C
 
 
 # ---- SQL normalization helpers -------------------------------------------------
