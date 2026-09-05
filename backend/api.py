@@ -1,6 +1,8 @@
 """HTTP API for the MoveInsight context engine."""
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -13,8 +15,8 @@ class ContextRequest(BaseModel):
     """KPI scope and time grain used to build one context response."""
 
     method: str = Field(min_length=1, description="Registered KPI method, for example ota")
-    filters: dict[str, str] | None = None
-    period: str | None = Field(
+    filters: Optional[dict[str, str]] = None
+    period: Optional[str] = Field(
         default=None,
         description="Focus bucket: YYYY-MM, YYYY-Www, or YYYY-MM-DD",
     )

@@ -12,7 +12,7 @@ Usage:
     from backend.metrics import Metrics
     from backend.context import ContextEngine
     ce = ContextEngine(Metrics("backend/mobility.duckdb"))
-    ce.context("ota", {"vendor": "Pooja Mikhailov Travel"}, month="2026-07")
+    ce.context("ota", {"vendor": "Pooja Mikhailov Travel"}, period="2026-07")
 """
 from __future__ import annotations
 from typing import Optional
@@ -40,6 +40,9 @@ class ContextEngine:
             raise ValueError(f"Unknown KPI: {kpi}")
         if period is None and month is not None:  # backward-compat
             period, grain = month, "month"
+        if period is None:
+            buckets = self.m.periods(grain, filters)
+            period = buckets[-1] if buckets else None
         reg = C.METRIC_REGISTRY[kpi]
         method = reg["method"]
         good_up = reg["good"] == "up"
@@ -59,7 +62,7 @@ class ContextEngine:
             "month": period if grain == "month" else None,  # legacy mirror
             "good_direction": reg["good"],
             "trend": self._trend(method, filters, period, grain, value, good_up),
-            "sla": self._sla(reg, value, good_up),
+            "sla": self._sla(kpi, reg, filters, value, good_up),
             "peer": self._peer(method, reg, filters, period, grain, value, good_up),
             "industry": self._industry(reg, value, good_up),
             "drivers_of_change": self._drivers(method, reg, filters, period, grain, good_up),
@@ -97,8 +100,19 @@ class ContextEngine:
 
     # -- 2. SLA / goal ---------------------------------------------------------
 
-    def _sla(self, reg, value, good_up):
+    def _sla(self, kpi, reg, filters, value, good_up):
         target = reg.get("sla")
+        if kpi == "ota" and filters:
+            tenant_id = filters.get("tenant_id")
+            vendor = filters.get("vendor")
+            target_frac = None
+            if vendor is not None:
+                target_frac = C.VENDOR_OTA_SLA.get((tenant_id, vendor))
+                target_frac = target_frac or C.VENDOR_OTA_SLA.get((None, vendor))
+            if target_frac is None and tenant_id is not None:
+                target_frac = C.TENANT_OTA_SLA.get(tenant_id)
+            if target_frac is not None:
+                target = target_frac * 100
         if target is None or value is None:
             return {"target": target, "gap_pts": None, "breached": None}
         gap = round(value - target, 2)                 # signed
@@ -139,7 +153,7 @@ class ContextEngine:
         if norm is None or value is None:
             return {"norm": norm, "delta": None, "source": "config assumption"}
         delta = round(value - norm, 2)
-        better = (delta > 0) == good_up
+        better = True if delta == 0 else (delta > 0) == good_up
         return {"norm": norm, "delta": delta, "better_than_norm": better,
                 "source": "config assumption"}
 

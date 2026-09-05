@@ -16,6 +16,12 @@ TENANT_OTA_SLA = {
     # "pinnacle-Slc": 0.92,
 }
 
+# Optional per-vendor OTA overrides. Keyed by (tenant_id, vendor) when tenant is
+# known, or (None, vendor) for a global vendor contract assumption.
+VENDOR_OTA_SLA = {
+    # ("pinnacle-Slc", "Pooja Mikhailov Travel"): 0.92,
+}
+
 # CO2 emission factors (kg CO2 per km) by fuel type. Stated assumptions —
 # rough public averages for a shared 4-seater; adjust with real factors.
 EMISSION_KG_PER_KM = {
@@ -103,6 +109,65 @@ DATA_MONTHS = ["2026-05", "2026-06", "2026-07"]
 # Time-bucketing grains. strftime formats are chosen to sort lexicographically.
 GRAIN_FMT = {"month": "%Y-%m", "week": "%Y-W%V", "day": "%Y-%m-%d"}
 DEFAULT_GRAIN = "month"
+
+# --- C4 insight / anomaly detection config -----------------------------------
+#
+# C4 consumes C3 context objects. It does not reason like an LLM; it evaluates
+# configured thresholds and produces repeatable signals + priority scores.
+C4_MIN_SAMPLE_SIZE = 200
+C4_ANOMALY_SCORE_THRESHOLD = 50
+C4_PRIORITY_BANDS = {
+    "critical": 85,
+    "high": 70,
+    "medium": 50,
+}
+
+C4_RULE_DEFAULTS = {
+    "sla_gap_pts": 3.0,
+    "trend_delta": 5.0,
+    "peer_percentile": 25,
+    "industry_delta": 5.0,
+    "driver_contribution_pct": 35.0,
+    "large_sample_size": 1000,
+}
+
+C4_RULES = {
+    "ota": {
+        "sla_gap_pts": 3.0,
+        "trend_delta": 2.0,
+        "industry_delta": 1.0,
+    },
+    "noshow_rate": {
+        "trend_delta": 1.5,
+        "industry_delta": 1.0,
+    },
+    "cost_per_trip": {
+        "trend_delta": 100.0,
+        "industry_delta": 100.0,
+    },
+    "occupancy": {
+        "trend_delta": 5.0,
+        "industry_delta": 5.0,
+    },
+    "co2_per_trip": {
+        "trend_delta": 0.5,
+        "industry_delta": 0.5,
+    },
+    "safety_score": {
+        "trend_delta": 3.0,
+        "industry_delta": 5.0,
+        "peer_percentile": 25,
+    },
+    "escort_compliance": {
+        "sla_gap_pts": 2.0,
+        "trend_delta": 3.0,
+        "industry_delta": 2.0,
+    },
+    "feedback_score": {
+        "trend_delta": 0.1,
+        "industry_delta": 0.1,
+    },
+}
 
 # Path to the persistent DuckDB file.
 DB_PATH = "mobility.duckdb"
