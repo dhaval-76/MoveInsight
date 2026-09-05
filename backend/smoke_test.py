@@ -112,6 +112,14 @@ def test_c3(ce: ContextEngine):
     d2 = ce.context("ota", {"tenant_id": TENANT, "vendor": one_vendor}, MONTH)["drivers_of_change"]
     check("drivers empty when vendor is pinned", d2 == [], f"{len(d2)} drivers")
 
+    # weekly grain gives a richer trend series derived from the data
+    wk = ce.context("ota", {"tenant_id": TENANT}, period="2026-W29", grain="week")
+    check("weekly grain yields > monthly points",
+          len(wk["trend"]["series"]) > len(C.DATA_MONTHS),
+          f"{len(wk['trend']['series'])} weekly buckets")
+    check("weekly headline says 'last week'", "last week" in wk["headline"],
+          wk["headline"][:60] + "...")
+
 
 def main():
     print("=" * 64)

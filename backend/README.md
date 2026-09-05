@@ -84,8 +84,14 @@ c = ContextEngine("backend/mobility.duckdb")
 ctx = c.context("ota", {"tenant_id": "pinnacle-Slc"}, month="2026-07")
 ctx["headline"]      # pre-composed, numbers-only sentence (zero hallucination risk)
 ctx["assessment"]    # "|"-joined flags: sla_breached|declining|bottom_quartile_peer|below_industry_norm, or "healthy"
+
+# Configurable time grain — month (default) | week | day.
+# Weekly gives ~13 trend points from the 3-month dataset vs 3 monthly.
+c.context("ota", {"tenant_id": "pinnacle-Slc"}, period="2026-W29", grain="week")
 ```
 
+Trend buckets are derived from the data (`Metrics.periods(grain)`), not hard-coded,
+so the axis adapts to the dataset and the chosen grain.
 Each context object bundles **4 reference points** around the raw value:
 
 1. `trend` — month-over-month series, moving avg, polarity-aware `improving` flag

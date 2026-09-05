@@ -100,6 +100,10 @@ METRIC_REGISTRY = {
 # Months present in the dataset, oldest -> newest (for trend defaults).
 DATA_MONTHS = ["2026-05", "2026-06", "2026-07"]
 
+# Time-bucketing grains. strftime formats are chosen to sort lexicographically.
+GRAIN_FMT = {"month": "%Y-%m", "week": "%Y-W%V", "day": "%Y-%m-%d"}
+DEFAULT_GRAIN = "month"
+
 # Path to the persistent DuckDB file.
 DB_PATH = "mobility.duckdb"
 

@@ -28,16 +28,23 @@ class ContextEngine:
     # -- public API ------------------------------------------------------------
 
     def context(self, kpi: str, filters: Optional[dict] = None,
+                period: Optional[str] = None, grain: str = "month",
                 month: Optional[str] = None) -> dict:
-        """Build the full context object for a KPI under a filter scope."""
+        """Build the full context object for a KPI under a filter scope.
+
+        `grain` buckets time as month | week | day; `period` is the focus bucket
+        (e.g. '2026-07', '2026-W29', '2026-07-15'). `month` is accepted as a
+        legacy alias for a monthly `period`.
+        """
         if kpi not in C.METRIC_REGISTRY:
             raise ValueError(f"Unknown KPI: {kpi}")
+        if period is None and month is not None:  # backward-compat
+            period, grain = month, "month"
         reg = C.METRIC_REGISTRY[kpi]
         method = reg["method"]
         good_up = reg["good"] == "up"
 
-        base = self.m.ota if False else None  # noqa (readability marker)
-        current = getattr(self.m, method)(filters, month)
+        current = getattr(self.m, method)(filters, period, grain)
         value = current.get("value")
 
         ctx = {
@@ -47,13 +54,15 @@ class ContextEngine:
             "value": value,
             "n": current.get("n"),
             "filters": filters or {},
-            "month": month,
+            "grain": grain,
+            "period": period,
+            "month": period if grain == "month" else None,  # legacy mirror
             "good_direction": reg["good"],
-            "trend": self._trend(method, filters, month, value, good_up),
+            "trend": self._trend(method, filters, period, grain, value, good_up),
             "sla": self._sla(reg, value, good_up),
-            "peer": self._peer(method, reg, filters, month, value, good_up),
+            "peer": self._peer(method, reg, filters, period, grain, value, good_up),
             "industry": self._industry(reg, value, good_up),
-            "drivers_of_change": self._drivers(method, reg, filters, month, good_up),
+            "drivers_of_change": self._drivers(method, reg, filters, period, grain, good_up),
         }
         ctx["assessment"] = self._assess(ctx, good_up)
         ctx["headline"] = self._headline(ctx)
@@ -61,24 +70,26 @@ class ContextEngine:
 
     # -- 1. historical trend ---------------------------------------------------
 
-    def _trend(self, method, filters, month, value, good_up):
+    def _trend(self, method, filters, period, grain, value, good_up):
         fn = getattr(self.m, method)
+        buckets = self.m.periods(grain, filters)      # derived from data, not hard-coded
         series = []
-        for mo in C.DATA_MONTHS:
-            r = fn(filters, mo)
-            series.append({"month": mo, "value": r.get("value"), "n": r.get("n")})
+        for b in buckets:
+            r = fn(filters, b, grain)
+            series.append({"period": b, "value": r.get("value"), "n": r.get("n")})
         vals = [s["value"] for s in series if s["value"] is not None]
         moving_avg = round(sum(vals) / len(vals), 2) if vals else None
 
-        # "last period" = the month before `month` (or the last full month)
-        idx = C.DATA_MONTHS.index(month) if month in C.DATA_MONTHS else len(C.DATA_MONTHS) - 1
+        # "last period" = the bucket before `period` (or the last full bucket)
+        idx = buckets.index(period) if period in buckets else len(buckets) - 1
         last = series[idx - 1]["value"] if idx - 1 >= 0 else None
-        cur = value if month else (series[-1]["value"] if series else None)
+        cur = value if period else (series[-1]["value"] if series else None)
         delta = None if (cur is None or last is None) else round(cur - last, 2)
         direction = None
         if delta is not None:
             direction = "flat" if delta == 0 else ("up" if delta > 0 else "down")
         return {
+            "grain": grain,
             "series": series, "moving_avg": moving_avg,
             "last_period": last, "delta": delta, "direction": direction,
             "improving": None if delta is None else ((delta > 0) == good_up or delta == 0),
@@ -96,10 +107,10 @@ class ContextEngine:
 
     # -- 3. peer comparison ----------------------------------------------------
 
-    def _peer(self, method, reg, filters, month, value, good_up):
+    def _peer(self, method, reg, filters, period, grain, value, good_up):
         dim = reg["attribution_dim"]
         min_n = C.PEER_MIN_TRIPS if dim in ("vendor",) else 200
-        groups = self.m.kpi_by_group(method, dim, filters, month, min_n=min_n)
+        groups = self.m.kpi_by_group(method, dim, filters, period, grain, min_n=min_n)
         if len(groups) < 2:
             return {"dim": dim, "rank": None, "total": len(groups),
                     "percentile": None, "best_in_class": None, "median": None}
@@ -134,7 +145,7 @@ class ContextEngine:
 
     # -- drivers of change (attribution) --------------------------------------
 
-    def _drivers(self, method, reg, filters, month, good_up, top=3):
+    def _drivers(self, method, reg, filters, period, grain, good_up, top=3):
         """Decompose the metric into the groups pulling it in the BAD direction.
 
         Each group's weighted deviation from the overall value = (n_g/N)*(v_g - V).
@@ -146,8 +157,8 @@ class ContextEngine:
         if (filters or {}).get(dim) is not None:
             return []
         min_n = C.PEER_MIN_TRIPS if dim in ("vendor",) else 200
-        groups = self.m.kpi_by_group(method, dim, filters, month, min_n=min_n)
-        overall = getattr(self.m, method)(filters, month)
+        groups = self.m.kpi_by_group(method, dim, filters, period, grain, min_n=min_n)
+        overall = getattr(self.m, method)(filters, period, grain)
         V, N = overall.get("value"), sum(g["n"] for g in groups)
         if V is None or not N:
             return []
@@ -196,7 +207,8 @@ class ContextEngine:
         t = ctx["trend"]
         if t.get("delta") is not None and t.get("last_period") is not None:
             arrow = "up" if t["delta"] > 0 else ("down" if t["delta"] < 0 else "flat")
-            parts.append(f"{arrow} from {t['last_period']} last month")
+            unit = t.get("grain", "month")
+            parts.append(f"{arrow} from {t['last_period']} last {unit}")
         s = ctx["sla"]
         if s.get("gap_pts") is not None:
             rel = "above" if s["gap_pts"] >= 0 else "below"
