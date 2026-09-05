@@ -19,8 +19,11 @@ class InsightEngine:
 
     # -- public API ------------------------------------------------------------
 
-    def evaluate_context(self, ctx: dict) -> dict:
-        """Classify one C3 context object into deterministic anomaly signals."""
+    def evaluate_context(self, ctx: dict) -> dict | list[dict]:
+        """Classify grouped OTA benchmarks or legacy KPI contexts."""
+        if ctx.get("kpi") == "ota" and "groups" in ctx:
+            return self.evaluate_ota_benchmark(ctx)
+
         kpi = ctx["kpi"]
         rules = self._rules(kpi)
         good_up = ctx.get("good_direction") == "up"
@@ -56,14 +59,46 @@ class InsightEngine:
         is_anomaly = has_bad_signal and score >= C.C4_ANOMALY_SCORE_THRESHOLD
         return self._result(ctx, signals, score, is_anomaly)
 
+    def evaluate_ota_benchmark(self, benchmark: dict) -> list[dict]:
+        """Return ranked OTA anomalies for all groups in a C3 benchmark."""
+        if benchmark.get("kpi") != "ota":
+            raise ValueError("evaluate_ota_benchmark only supports kpi='ota'.")
+
+        insights = [
+            self._evaluate_ota_group(benchmark, group)
+            for group in benchmark.get("groups", [])
+        ]
+        if not any(item["is_anomaly"] for item in insights):
+            overall = self._overall_scope_group(benchmark)
+            if overall:
+                insights.append(self._evaluate_ota_group(benchmark, overall))
+        return sorted(
+            [item for item in insights if item["is_anomaly"]],
+            key=lambda item: (item["priority_score"], item.get("context", {}).get("n", 0)),
+            reverse=True,
+        )
+
+    def scan_ota_period(
+        self,
+        tenant_id: Optional[str],
+        period: str,
+        grain: str = "month",
+        dimension: str = "vendor",
+    ) -> list[dict]:
+        """Scan grouped OTA benchmark data for one tenant and dimension."""
+        filters = {"tenant_id": tenant_id} if tenant_id else {}
+        return self.evaluate_ota_benchmark(
+            self.context_engine.ota_benchmark(filters, period, grain, dimension)
+        )
+
     def scan_period(self, period: str, grain: str = "month",
                     tenant_id: Optional[str] = None,
                     kpis: Optional[list[str]] = None,
                     dimensions: Optional[list[str]] = None,
                     include_global: bool = False) -> list[dict]:
         """Scan tenant and dimension scopes for a period; return ranked anomalies."""
-        kpis = kpis or list(C.METRIC_REGISTRY)
-        dimensions = dimensions or ["vendor", "office"]
+        kpis = list(C.METRIC_REGISTRY) if kpis is None else kpis
+        dimensions = ["vendor", "office"] if dimensions is None else dimensions
         scopes = self._period_scopes(period, grain, tenant_id, dimensions, include_global)
 
         insights = []
@@ -73,15 +108,90 @@ class InsightEngine:
                     kpi, scope["filters"], period=period, grain=grain
                 )
                 evaluated = self.evaluate_context(ctx)
-                if evaluated["is_anomaly"]:
-                    evaluated["scope_type"] = scope["type"]
-                    insights.append(evaluated)
+                evaluations = evaluated if isinstance(evaluated, list) else [evaluated]
+                for item in evaluations:
+                    if item["is_anomaly"]:
+                        item["scope_type"] = scope["type"]
+                        insights.append(item)
 
         insights.sort(
-            key=lambda i: (i["priority_score"], i["context"].get("n") or 0),
+            key=lambda i: (i["priority_score"], self._insight_sample_size(i)),
             reverse=True,
         )
         return insights
+
+    @staticmethod
+    def _insight_sample_size(insight: dict) -> int:
+        return (insight.get("context") or {}).get("n") or (insight.get("group") or {}).get("n") or 0
+
+    def _overall_scope_group(self, benchmark: dict) -> dict | None:
+        overall = benchmark.get("overall") or {}
+        value, sla = overall.get("value"), overall.get("sla")
+        if value is None or sla is None:
+            return None
+        gap = round(value - sla, 2)
+        scope = benchmark.get("scope") or {}
+        dimension = "tenant" if benchmark.get("tenant_id") else "global"
+        name = benchmark.get("tenant_id") or "all"
+        for candidate in ("vendor", "office", "shift_type", "direction", "mode"):
+            if scope.get(candidate) is not None:
+                dimension, name = candidate, scope[candidate]
+                break
+        return {
+            "dimension": dimension,
+            "name": name,
+            "value": value,
+            "n": overall.get("n"),
+            "sla_gap_pts": gap,
+            "breached": gap < 0,
+            "scope_overall": True,
+        }
+
+    def _evaluate_ota_group(self, benchmark: dict, group: dict) -> dict:
+        n = group.get("n") or 0
+        minimum = C.C4_OTA_MIN_SAMPLE_BY_GRAIN.get(
+            benchmark.get("grain"), C.C4_MIN_SAMPLE_SIZE
+        )
+        signals = [{
+            "name": "sample_confident" if n >= minimum else "sample_below_confidence_floor",
+            "detail": f"n={n} for {benchmark.get('grain')} confidence floor {minimum}",
+            "points": 10.0 if n >= minimum else 0.0,
+        }]
+        if not group.get("breached"):
+            return self._ota_result(benchmark, group, signals, 0.0, False)
+
+        gap = abs(group.get("sla_gap_pts") or 0)
+        signals.append({
+            "name": "sla_breach",
+            "detail": f"OTA is {gap:.2f} pts below SLA",
+            "points": round(min(60.0, 30.0 + gap * 0.5), 1),
+            "bad": True,
+        })
+        score = min(round(signals[0]["points"] + signals[1]["points"] + min(30.0, 10.0 + n / max(minimum, 1) * 2.0), 1), 100.0)
+        signals.append({"name": "affected_trip_volume", "detail": f"{n} trips affected", "points": round(min(30.0, 10.0 + n / max(minimum, 1) * 2.0), 1)})
+        return self._ota_result(benchmark, group, signals, score, True)
+
+    def _ota_result(self, benchmark: dict, group: dict, signals: list[dict], score: float, is_anomaly: bool) -> dict:
+        filters = benchmark.get("scope") or {}
+        context = {
+            "kpi": "ota", "label": "On-time arrival", "unit": "%",
+            "value": group.get("value"), "n": group.get("n"),
+            "filters": filters, "period": benchmark.get("period"),
+            "grain": benchmark.get("grain"),
+            "good_direction": "up",
+            "sla": {"target": (benchmark.get("overall") or {}).get("sla"), "gap_pts": group.get("sla_gap_pts"), "breached": group.get("breached")},
+            "groups": benchmark.get("groups", []),
+        }
+        return {
+            "insight_id": "|".join(["ota", str(benchmark.get("grain")), str(benchmark.get("period")), f"tenant_id={benchmark.get('tenant_id')}", f"{group.get('dimension')}={group.get('name')}"]),
+            "kpi": "ota", "anomaly_type": "ota_sla_breach", "is_anomaly": is_anomaly,
+            "priority_score": score, "priority_band": self._priority_band(score),
+            "confidence": "normal" if (group.get("n") or 0) >= C.C4_OTA_MIN_SAMPLE_BY_GRAIN.get(benchmark.get("grain"), C.C4_MIN_SAMPLE_SIZE) else "low",
+            "tenant_id": benchmark.get("tenant_id"), "period": benchmark.get("period"),
+            "grain": benchmark.get("grain"), "group": group, "signals": signals,
+            "context": context,
+            "summary": f"OTA for {group.get('dimension')} {group.get('name')} classified as {'anomaly' if is_anomaly else 'not_anomaly'} for {benchmark.get('grain')} {benchmark.get('period')} with priority score {score}.",
+        }
 
     def scan_month(self, month: str, tenant_id: Optional[str] = None,
                    kpis: Optional[list[str]] = None,

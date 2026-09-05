@@ -204,7 +204,7 @@ def _build_data_quality(con):
 
 def build(db_path: str | None = None, verbose: bool = True) -> str:
     """Build the full canonical DuckDB from raw CSVs. Returns the db path."""
-    db_path = db_path or os.path.join(C.DATA_DIR, "backend", C.DB_PATH)
+    db_path = db_path or C.DB_PATH
     if os.path.exists(db_path):
         os.remove(db_path)
     con = duckdb.connect(db_path)

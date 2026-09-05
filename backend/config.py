@@ -4,6 +4,16 @@ These are NOT in the dataset — they are supplied here with stated assumptions,
 per HLD §2.4. Editable per tenant/vendor.
 """
 
+import os
+
+try:
+    from dotenv import load_dotenv
+    _base_dir = os.path.dirname(os.path.abspath(__file__))
+    load_dotenv(os.path.join(_base_dir, ".env"))
+    load_dotenv(os.path.join(os.path.dirname(_base_dir), ".env"))
+except ImportError:
+    pass
+
 # On-time-arrival threshold: a trip is "on time" if delay <= this many minutes.
 OTA_THRESHOLD_MIN = 10
 
@@ -115,6 +125,11 @@ DEFAULT_GRAIN = "month"
 # C4 consumes C3 context objects. It does not reason like an LLM; it evaluates
 # configured thresholds and produces repeatable signals + priority scores.
 C4_MIN_SAMPLE_SIZE = 200
+C4_OTA_MIN_SAMPLE_BY_GRAIN = {
+    "day": 20,
+    "week": 100,
+    "month": 200,
+}
 C4_ANOMALY_SCORE_THRESHOLD = 50
 C4_PRIORITY_BANDS = {
     "critical": 85,
@@ -174,13 +189,18 @@ C4_RULES = {
 # Configurable reasoning mode:
 # If ENABLE_REASONING is True: Sense + Reason + Act (root cause investigation, driver breakdown, reasoning trace)
 # If ENABLE_REASONING is False: Sense + Act (direct anomaly-to-action payload without reasoning trace)
-ENABLE_REASONING = True
+ENABLE_REASONING = os.environ.get("ENABLE_REASONING", "true").strip().lower() in {
+    "1", "true", "yes", "on",
+}
 
-# Grok (xAI) LLM Reasoning Configuration
-import os
-GROK_API_KEY = os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY", "")
-GROK_BASE_URL = os.environ.get("GROK_BASE_URL", "https://api.x.ai/v1")
-GROK_MODEL = os.environ.get("GROK_MODEL", "grok-2-latest")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY", "")
+GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
+
+# Backward compatibility aliases
+GROK_API_KEY = GROQ_API_KEY
+GROK_BASE_URL = GROQ_BASE_URL
+GROK_MODEL = GROQ_MODEL
 
 # Persona routing rules based on priority bands and KPI domain
 PERSONA_ROUTING = {
@@ -191,14 +211,29 @@ PERSONA_ROUTING = {
 }
 
 # Path to the persistent DuckDB file.
-DB_PATH = "mobility.duckdb"
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mobility.duckdb")
 
-# Data directory (where the raw CSVs live).
 import os
-DATA_DIR = os.environ.get(
-    "MOVEINSYNC_DATA_DIR",
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+_default_input_data = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "input_data"))
+_fallback_data = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_data_dir_default = _default_input_data if os.path.exists(_default_input_data) else _fallback_data
+
+DATA_DIR = os.environ.get("MOVEINSYNC_DATA_DIR", _data_dir_default)
+
+# --- C5 lightweight reasoning config -----------------------------------------
+#
+# Groq exposes an OpenAI-compatible API. Prefer the environment for secrets.
+# For demo-only local runs, set GROQ_API_KEY in .env; do not commit a real key.
+GROQ_API_KEY_ENV = "GROQ_API_KEY"
+GROQ_API_BASE_URL = os.environ.get(
+    "GROQ_API_BASE_URL", GROQ_BASE_URL
 )
+GROQ_REASONING_MODEL = os.environ.get(
+    "GROQ_REASONING_MODEL", GROQ_MODEL
+)
+GROQ_TIMEOUT_SECONDS = float(os.environ.get("GROQ_TIMEOUT_SECONDS", "20"))
+GROQ_MAX_TOKENS = int(os.environ.get("GROQ_MAX_TOKENS", "1600"))
+GROQ_TEMPERATURE = float(os.environ.get("GROQ_TEMPERATURE", "0.2"))
 
 # Raw file names (the thin adapter: change these + the column map in ingest.py
 # if the real schema shifts).
@@ -211,5 +246,3 @@ EMP_FILE = "emp_Data.csv"
 BILL_FILE = "bill_data.csv"
 FEEDBACK_FILE = "trip_feedback.csv"
 ALERTS_FILE = "alerts_data.csv"
-
-
