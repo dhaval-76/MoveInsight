@@ -5,15 +5,15 @@ messy-data handling lives here (the "thin adapter" of the HLD): ID/date/cost
 normalization, alert-severity cleaning, tenant tagging, and a data_quality
 report.
 
-Run:  python -m app.ingest        (from the app's parent dir)
-   or python app/ingest.py
+Run:  python -m backend.ingest        (from the backend's parent dir)
+   or python backend/ingest.py
 """
 from __future__ import annotations
 import os
 import time
 import duckdb
 
-from .. import config as C
+from . import config as C
 
 
 # ---- SQL normalization helpers -------------------------------------------------
@@ -204,7 +204,7 @@ def _build_data_quality(con):
 
 def build(db_path: str | None = None, verbose: bool = True) -> str:
     """Build the full canonical DuckDB from raw CSVs. Returns the db path."""
-    db_path = db_path or os.path.join(C.DATA_DIR, "app", C.DB_PATH)
+    db_path = db_path or os.path.join(C.DATA_DIR, "backend", C.DB_PATH)
     if os.path.exists(db_path):
         os.remove(db_path)
     con = duckdb.connect(db_path)
