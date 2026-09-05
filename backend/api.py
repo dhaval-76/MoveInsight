@@ -159,6 +159,39 @@ def process_anomaly(request: ProcessAnomalyRequest) -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@app.post("/agent/ota/reason")
+def reason_about_ota(request: ContextRequest) -> dict:
+    """Run grouped C3/C4 OTA analysis and process each result through C5."""
+    if request.method != "ota":
+        raise HTTPException(status_code=400, detail="This endpoint requires method='ota'.")
+    try:
+        context = _context_engine.context(
+            request.method,
+            request.filters,
+            request.period,
+            request.grain,
+        )
+        insights = _insight_engine.evaluate_context(context)
+        if not isinstance(insights, list):
+            insights = [insights] if insights.get("is_anomaly") else []
+        results = [
+            _agent_orchestrator.process_anomaly(insight, enable_reasoning=True)
+            for insight in insights
+        ]
+        return {
+            "agent": "ota_reasoning",
+            "status": "anomaly" if insights else "not_anomaly",
+            "period": context.get("period"),
+            "grain": context.get("grain"),
+            "c4_alerts": insights,
+            "c5_results": results,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.post("/agent/scan")
 def scan_and_process(request: ScanAgentRequest) -> list[dict]:
     """Scan a period for anomalies via C4 and return agent responses for each."""

@@ -89,30 +89,29 @@ def test_c3(ce: ContextEngine):
     print("\nC3  context engine (benchmarking)")
     for kpi in C.METRIC_REGISTRY:
         ctx = ce.context(kpi, {"tenant_id": TENANT}, MONTH)
-        missing = REQUIRED_KEYS - set(ctx)
-        good = not missing and isinstance(ctx["trend"]["series"], list) \
-            and len(ctx["trend"]["series"]) == len(C.DATA_MONTHS) \
-            and isinstance(ctx["headline"], str) and ctx["headline"].endswith(".")
-        check(f"context('{kpi}') well-formed", good,
-              (f"missing {missing}" if missing else f"assess={ctx['assessment']}"))
+        if kpi == "ota":
+            good = (
+                ctx.get("kpi") == "ota"
+                and isinstance(ctx.get("overall"), dict)
+                and isinstance(ctx.get("groups"), list)
+            )
+            detail = f"{len(ctx.get('groups', []))} grouped vendors"
+        else:
+            missing = REQUIRED_KEYS - set(ctx)
+            good = not missing and isinstance(ctx["trend"]["series"], list) \
+                and len(ctx["trend"]["series"]) == len(C.DATA_MONTHS) \
+                and isinstance(ctx["headline"], str) and ctx["headline"].endswith(".")
+            detail = f"missing {missing}" if missing else f"assess={ctx['assessment']}"
+        check(f"context('{kpi}') well-formed", good, detail)
 
-    print("\n  sample headline (ota, whole tenant):")
-    print("   ", ce.context("ota", {"tenant_id": TENANT}, MONTH)["headline"])
-
-    d = ce.context("ota", {"tenant_id": TENANT}, MONTH)["drivers_of_change"]
-    check("drivers_of_change populated at tenant scope", len(d) >= 1,
-          f"{len(d)} drivers, top={d[0]['label'] if d else '-'}")
-
-    one_vendor = d[0]["label"] if d else "Pooja Mikhailov Travel"
-    d2 = ce.context("ota", {"tenant_id": TENANT, "vendor": one_vendor}, MONTH)["drivers_of_change"]
-    check("drivers empty when vendor is pinned", d2 == [], f"{len(d2)} drivers")
+    ota_ctx = ce.context("ota", {"tenant_id": TENANT}, MONTH)
+    check("OTA benchmark includes tenant overall", ota_ctx["overall"].get("n", 0) > 0)
+    check("OTA benchmark includes vendor groups", len(ota_ctx["groups"]) >= 1,
+          f"{len(ota_ctx['groups'])} groups")
 
     wk = ce.context("ota", {"tenant_id": TENANT}, period="2026-W29", grain="week")
-    check("weekly grain yields > monthly points",
-          len(wk["trend"]["series"]) > len(C.DATA_MONTHS),
-          f"{len(wk['trend']['series'])} weekly buckets")
-    check("weekly headline says 'last week'", "last week" in wk["headline"],
-          wk["headline"][:60] + "...")
+    check("weekly OTA benchmark uses requested grain", wk["grain"] == "week",
+          f"{len(wk['groups'])} weekly groups")
 
 
 # --------------------------------------------------------------------------- C4

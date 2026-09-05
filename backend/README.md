@@ -11,8 +11,9 @@ backend/
   config.py    SLA targets, emission factors, thresholds, file names + METRIC_REGISTRY (the tunable knobs)
   ingest.py    C1 — load 7 CSVs -> clean canonical DuckDB (ID/date/cost/severity normalization)
   metrics.py   C2 — whitelisted KPI functions (safe query interface for the agent + dashboard)
-  context.py   C3 — wraps KPI values with trend/SLA/peer/industry context
-  insights.py  C4 — deterministic anomaly detection + priority scoring over C3 context
+  context.py   C3 — OTA benchmark context with overall + grouped vendor/office facts
+  insights.py  C4 — deterministic OTA SLA-breach detection over C3 groups
+  agent.py     C5 — focused OTA reasoning using Groq over C4 evidence
 ```
 
 ## Setup
@@ -123,13 +124,38 @@ Only `method` is required. `filters` and `period` are optional; when omitted,
 the context engine uses the full data scope and its latest available period.
 `grain` is optional and defaults to `month`.
 
-The response is the full context object produced by `ContextEngine` — value,
-sample size, trend, SLA, peer comparison, industry norm, drivers of change,
-assessment, and headline.
+For `method="ota"`, the response is the grouped OTA benchmark contract:
+
+```json
+{
+  "kpi": "ota",
+  "tenant_id": "pinnacle-Slc",
+  "period": "2026-07",
+  "grain": "month",
+  "overall": {
+    "value": 96.27,
+    "n": 88574,
+    "sla": 90.0
+  },
+  "groups": [
+    {
+      "dimension": "vendor",
+      "name": "Pooja Sokolov Travel",
+      "value": 31.45,
+      "n": 248,
+      "sla_gap_pts": -58.55,
+      "breached": true
+    }
+  ]
+}
+```
+
+For non-OTA KPIs, `ContextEngine` still returns the richer generic context
+object with trend, SLA, peer, industry, attribution, assessment, and headline.
 
 ## Test C4 insights through the API
 
-Evaluate one KPI context:
+Evaluate OTA groups for one tenant/period:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/insights/evaluate \
@@ -145,14 +171,39 @@ curl -X POST http://127.0.0.1:8000/insights/scan \
   -d '{"period":"2026-07","grain":"month","tenant_id":"pinnacle-Slc","kpis":["ota"],"dimensions":["vendor"]}'
 ```
 
-Both routes return deterministic C4 output and are also available through the
+For OTA, `/insights/evaluate` returns a list of breached groups. Both routes
+return deterministic C4 output and are also available through the
 interactive docs at `http://127.0.0.1:8000/docs`.
+
+## Use the OTA reasoning layer (C5)
+
+Set your Groq key in the environment before starting the API, or fill
+`GROQ_API_KEY` in `backend/config.py` for a local demo run:
+
+```bash
+export GROQ_API_KEY="..."
+export GROQ_REASONING_MODEL="openai/gpt-oss-20b"
+```
+
+Reason over all C4 OTA alerts for one context:
+
+```bash
+curl -X POST http://127.0.0.1:8000/agent/ota/reason \
+  -H 'Content-Type: application/json' \
+  -d '{"method":"ota","filters":{"tenant_id":"pinnacle-Slc"},"period":"2026-07","grain":"month"}'
+```
+
+The C5 route does not compute KPIs and does not decide anomalies. It builds the
+C3 OTA benchmark, lets C4 classify group-level SLA breaches, then sends all C4
+alerts to Groq for concise operational interpretations and
+investigation-oriented next steps. The response includes a `results` array with
+one reasoning object per C4 alert.
 
 ### API flow
 
-1. Call `POST /context` when the consumer needs the KPI context only.
-2. Call `POST /insights/evaluate` when one KPI context should be classified
-   into anomaly signals, priority score, and summary.
+1. Call `POST /context` when the consumer needs C3 context only.
+2. Call `POST /insights/evaluate` when OTA groups should be classified into
+   anomaly signals, priority score, and summary.
 3. Call `POST /insights/scan` when ranked anomalies are needed across a tenant's
    vendors/offices for a period.
 
@@ -161,6 +212,12 @@ values or insight scores:
 
 ```text
 request -> Metrics -> ContextEngine (C3) -> InsightEngine (C4) -> response
+```
+
+The C5 OTA route extends that flow:
+
+```text
+request -> Metrics -> ContextEngine (C3) -> InsightEngine (C4) -> OtaReasoningAgent (C5) -> response
 ```
 
 Invalid request fields such as an unsupported `grain` return `422`. Valid
@@ -190,7 +247,7 @@ m.data_health("pinnacle-Slc")            # graceful-degradation panel
 
 ## Use the context engine (C3)
 
-Wraps any KPI in benchmarking context — the "so what" layer that feeds C4/C6.
+For OTA, C3 returns the grouped benchmark object that feeds C4.
 
 ```python
 from backend.metrics import Metrics
@@ -200,26 +257,17 @@ m = Metrics("backend/mobility.duckdb")
 c = ContextEngine(m)
 
 ctx = c.context("ota", {"tenant_id": "pinnacle-Slc"}, period="2026-07", grain="month")
-ctx["headline"]      # pre-composed, numbers-only sentence (zero hallucination risk)
-ctx["assessment"]    # "|"-joined flags: sla_breached|declining|bottom_quartile_peer|below_industry_norm, or "healthy"
+ctx["overall"]       # tenant-level OTA value, sample size, and SLA
+ctx["groups"]        # all grouped vendor rows with value, n, SLA gap, breach flag
 
 # Configurable time grain — month (default) | week | day.
 # Weekly gives ~13 trend points from the 3-month dataset vs 3 monthly.
 c.context("ota", {"tenant_id": "pinnacle-Slc"}, period="2026-W29", grain="week")
 ```
 
-Trend buckets are derived from the data (`Metrics.periods(grain)`), not hard-coded,
-so the axis adapts to the dataset and the chosen grain.
-Each context object bundles **4 reference points** around the raw value:
-
-1. `trend` — month-over-month series, moving avg, polarity-aware `improving` flag
-2. `sla` — signed `gap_pts` vs target + `breached`
-3. `peer` — volume-normalized rank/percentile + best/median/worst spread
-4. `industry`— delta vs configured industry norm
-
-Plus `drivers_of_change[]` — weighted attribution of which vendors/offices move the
-number, ranked by `contribution_pct`. See `./backend/sample_context.json` for full examples
-(this is the locked contract for `GET /api/context/{kpi}`).
+Period buckets are derived from the data (`Metrics.periods(grain)`), not
+hard-coded, so month/week/day contexts all use the same C3 contract. C3 does
+not trim to top drivers for OTA; C4 receives every group in `groups`.
 
 ## Use the C3/C4 intelligence layers
 
@@ -233,7 +281,7 @@ c3 = ContextEngine(m)
 c4 = InsightEngine(c3)
 
 ctx = c3.context("ota", {"tenant_id": "pinnacle-Slc"}, month="2026-07")
-c4.evaluate_context(ctx)                  # classify one context object
+c4.evaluate_context(ctx)                  # returns ranked OTA SLA-breach insights
 c4.scan_month("2026-07", tenant_id="pinnacle-Slc")
                                            # ranked anomalies for C5/C6/C7
 c4.scan_period("2026-W29", grain="week", tenant_id="pinnacle-Slc")
@@ -266,6 +314,7 @@ whitelisted set of filter dimensions (`ALLOWED_DIMS`). Illegal dimensions raise
 
 ## Notes for the other workstreams
 
-- **C3 (benchmarking)** is built — `context.py` consumes the `Metrics` helpers (`distinct`, `kpi_by_group`, trends) to produce the context object per KPI.
-- **C4 (insights/anomalies)** consumes C3 context objects and applies deterministic configured rules from `config.py`.
+- **C3 (benchmarking)** is built — for OTA, `context.py` returns tenant-level overall OTA plus all grouped vendor/office rows with SLA gaps.
+- **C4 (insights/anomalies)** consumes C3 OTA groups and raises deterministic SLA-breach anomalies from configured sample thresholds.
+- **C5 (OTA reasoning)** consumes C4 OTA output and calls Groq for concise interpretation only; all numbers still come from C2/C3/C4.
 - **C8 (dashboard/chat)** reads the same `Metrics`/`ContextEngine` functions — one source of truth.

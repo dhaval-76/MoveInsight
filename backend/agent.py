@@ -164,8 +164,14 @@ class AgentOrchestrator:
 
         if self.context_engine:
             ctx = self.context_engine.context(kpi_target, filters=filters, period=focus_period, grain=grain)
-            headline = ctx.get("headline", "")
-            n = ctx.get("n", 0)
+            if kpi_target == "ota" and ctx.get("overall"):
+                overall = ctx["overall"]
+                value = overall.get("value")
+                n = overall.get("n", 0)
+                headline = f"On-time arrival {value}% for {focus_period}."
+            else:
+                headline = ctx.get("headline", "")
+                n = ctx.get("n", 0)
         else:
             ctx = {"kpi": kpi_target, "value": None, "n": 0}
             headline = f"KPI '{kpi_target}' query processed"
