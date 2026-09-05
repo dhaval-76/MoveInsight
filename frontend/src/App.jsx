@@ -32,7 +32,9 @@ function App() {
   const [tenantFilter, setTenantFilter] = useState("all");
   const [selectedAlertId, setSelectedAlertId] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isGroqRunning, setIsGroqRunning] = useState(false);
   const [apiError, setApiError] = useState("");
+  const [runMessage, setRunMessage] = useState("");
   const [latestPeriod, setLatestPeriod] = useState("");
 
   useEffect(() => {
@@ -78,6 +80,39 @@ function App() {
       setApiError(error.message || "Unable to load alerts");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const runGroqPipeline = async () => {
+    if (!latestPeriod) {
+      setApiError("No completed data period is available");
+      return;
+    }
+    setIsGroqRunning(true);
+    setApiError("");
+    setRunMessage("");
+    try {
+      const response = await fetch(`${apiUrl}/alerts/run`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          period: latestPeriod,
+          grain: "month",
+          enable_reasoning: true,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Groq pipeline returned ${response.status}`);
+      }
+      const result = await response.json();
+      await loadAlerts();
+      setRunMessage(
+        `Groq pipeline completed: ${result.alerts_saved} alerts saved for ${result.tenants.length} tenants.`,
+      );
+    } catch (error) {
+      setApiError(error.message || "Unable to run Groq pipeline");
+    } finally {
+      setIsGroqRunning(false);
     }
   };
 
@@ -163,15 +198,24 @@ function App() {
             Latest completed period: {latestPeriod || "loading..."}
           </p>
         </div>
-        <button
-          className='primary-btn'
-          onClick={loadAlerts}
-          disabled={isLoading}>
-          {isLoading ? "Refreshing alerts..." : "Refresh alerts"}
-        </button>
+        <div className='topbar-actions'>
+          <button
+            className='secondary-btn'
+            onClick={loadAlerts}
+            disabled={isLoading || isGroqRunning}>
+            {isLoading ? "Refreshing alerts..." : "Refresh alerts"}
+          </button>
+          <button
+            className='primary-btn'
+            onClick={runGroqPipeline}
+            disabled={isGroqRunning || !latestPeriod}>
+            {isGroqRunning ? "Running Groq pipeline..." : "Run Groq pipeline"}
+          </button>
+        </div>
       </header>
 
       {apiError && <p className='api-error'>{apiError}</p>}
+      {runMessage && <p className='run-success'>{runMessage}</p>}
 
       <section className='summary-grid'>
         <div className='summary-card'>
