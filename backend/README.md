@@ -67,6 +67,52 @@ The response is the full context object produced by `ContextEngine` — value,
 sample size, trend, SLA, peer comparison, industry norm, drivers of change,
 assessment, and headline.
 
+## Test C4 insights through the API
+
+Evaluate one KPI context:
+
+```bash
+curl -X POST http://127.0.0.1:8000/insights/evaluate \
+  -H 'Content-Type: application/json' \
+  -d '{"method":"ota","filters":{"tenant_id":"pinnacle-Slc"},"period":"2026-07","grain":"month"}'
+```
+
+Scan ranked anomalies for a period:
+
+```bash
+curl -X POST http://127.0.0.1:8000/insights/scan \
+  -H 'Content-Type: application/json' \
+  -d '{"period":"2026-07","grain":"month","tenant_id":"pinnacle-Slc","kpis":["ota"],"dimensions":["vendor"]}'
+```
+
+Both routes return deterministic C4 output and are also available through the
+interactive docs at `http://127.0.0.1:8000/docs`.
+
+### API flow
+
+1. Call `POST /context` when the consumer needs the KPI context only.
+2. Call `POST /insights/evaluate` when one KPI context should be classified
+   into anomaly signals, priority score, and summary.
+3. Call `POST /insights/scan` when ranked anomalies are needed across a tenant's
+   vendors/offices for a period.
+
+The C4 routes calculate their own C3 context; clients do not send calculated
+values or insight scores:
+
+```text
+request -> Metrics -> ContextEngine (C3) -> InsightEngine (C4) -> response
+```
+
+Invalid request fields such as an unsupported `grain` return `422`. Valid
+request shapes with an unknown KPI or filter dimension return `400`.
+
+### API state
+
+The API is stateless. It does not persist sessions, request history, computed
+contexts, or insight results. Every request recalculates its response from the
+read-only DuckDB data. The API process keeps a database connection open while
+running, but restarting Uvicorn does not lose application state.
+
 ## Use the metrics layer
 
 ```python
