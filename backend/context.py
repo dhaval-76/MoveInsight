@@ -159,12 +159,12 @@ class ContextEngine:
 
     # -- drivers of change (attribution) --------------------------------------
 
-    def _drivers(self, method, reg, filters, period, grain, good_up, top=3):
-        """Decompose the metric into the groups pulling it in the BAD direction.
+    def _drivers(self, method, reg, filters, period, grain, good_up, top=None):
+        """Decompose the metric into all groups pulling it in the BAD direction (least performers).
 
         Each group's weighted deviation from the overall value = (n_g/N)*(v_g - V).
-        These sum to ~0. Groups deviating in the bad direction are the drivers.
-        Works for any weighted-average rate KPI regardless of polarity.
+        Groups deviating in the bad direction are returned as least performers / drivers.
+        Returns empty list [] if the attribution dimension is already pinned in filters.
         """
         dim = reg["attribution_dim"]
         # don't attribute across the same dim we've already filtered to a single value
@@ -187,7 +187,8 @@ class ContextEngine:
         total_bad = sum(c["_bad"] for c in contribs) or 1
         contribs.sort(key=lambda c: c["_bad"], reverse=True)
         out = []
-        for c in contribs[:top]:
+        selected = contribs[:top] if top is not None else contribs
+        for c in selected:
             out.append({"dimension": c["dimension"], "label": c["label"],
                         "value": c["value"], "n": c["n"],
                         "contribution_pct": round(100 * c["_bad"] / total_bad, 1)})
