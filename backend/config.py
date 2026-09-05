@@ -169,6 +169,27 @@ C4_RULES = {
     },
 }
 
+# --- C5 agent orchestration config --------------------------------------------
+#
+# Configurable reasoning mode:
+# If ENABLE_REASONING is True: Sense + Reason + Act (root cause investigation, driver breakdown, reasoning trace)
+# If ENABLE_REASONING is False: Sense + Act (direct anomaly-to-action payload without reasoning trace)
+ENABLE_REASONING = True
+
+# Grok (xAI) LLM Reasoning Configuration
+import os
+GROK_API_KEY = os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY", "")
+GROK_BASE_URL = os.environ.get("GROK_BASE_URL", "https://api.x.ai/v1")
+GROK_MODEL = os.environ.get("GROK_MODEL", "grok-2-latest")
+
+# Persona routing rules based on priority bands and KPI domain
+PERSONA_ROUTING = {
+    "critical": ["transport_manager", "facilities_head"],
+    "high": ["transport_manager", "facilities_head"],
+    "medium": ["transport_manager"],
+    "low": ["line_manager"],
+}
+
 # Path to the persistent DuckDB file.
 DB_PATH = "mobility.duckdb"
 
@@ -190,3 +211,5 @@ EMP_FILE = "emp_Data.csv"
 BILL_FILE = "bill_data.csv"
 FEEDBACK_FILE = "trip_feedback.csv"
 ALERTS_FILE = "alerts_data.csv"
+
+
