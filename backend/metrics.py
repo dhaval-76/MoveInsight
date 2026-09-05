@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Optional
 import duckdb
 
-from .. import config as C
+from . import config as C
 
 # Whitelisted dimensions an LLM/tool is allowed to filter on.
 ALLOWED_DIMS = {"tenant_id", "vendor", "office", "mode", "shift_type", "direction"}
@@ -23,15 +23,18 @@ class Metrics:
 
     # -- internal: build a safe WHERE clause from whitelisted dims -------------
     def _where(self, filters: Optional[dict], month: Optional[str] = None,
-               ts_col: str = "actual_start"):
+               ts_col: str = "actual_start", alias: str = ""):
+        """Build a parameterized WHERE. `alias` qualifies columns (e.g. 't')
+        so filters are unambiguous when trips is joined to another table."""
+        pfx = f"{alias}." if alias else ""
         clauses, params = [], []
         for k, v in (filters or {}).items():
             if k not in ALLOWED_DIMS:
                 raise ValueError(f"Illegal filter dimension: {k}")
-            clauses.append(f"{k} = ?")
+            clauses.append(f"{pfx}{k} = ?")
             params.append(v)
         if month:  # 'YYYY-MM'
-            clauses.append(f"strftime({ts_col}, '%Y-%m') = ?")
+            clauses.append(f"strftime({pfx}{ts_col}, '%Y-%m') = ?")
             params.append(month)
         sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         return sql, params
@@ -72,7 +75,7 @@ class Metrics:
 
     def cost_per_trip(self, filters=None, month=None):
         # bills has no timestamp -> join to trips for time/dim filtering
-        w, p = self._where(filters, month)
+        w, p = self._where(filters, month, alias="t")
         row = self._scalar(f"""
             SELECT round(avg(b.trip_cost), 1) AS avg_cost, count(b.trip_cost) AS n
             FROM trips t JOIN bills b USING (trip_id){w}""", p)
@@ -101,7 +104,7 @@ class Metrics:
         w, p = self._where(filters, month)
         n = self._scalar(f"SELECT count(*) FROM trips{w}", p)[0]
         # alerts filtered by the same dims via join to trips
-        wa, pa = self._where(filters, month)
+        wa, pa = self._where(filters, month, alias="t")
         serious = self._scalar(f"""
             SELECT count(*) FROM alerts a JOIN trips t USING (trip_id){wa}
             {'AND' if wa else 'WHERE'} a.event_type IN
@@ -123,7 +126,7 @@ class Metrics:
         return {"kpi": "night_escort_compliance_pct", "value": row[0], "n": row[1], "unit": "%"}
 
     def feedback_score(self, filters=None, month=None):
-        w, p = self._where(filters, month)
+        w, p = self._where(filters, month, alias="t")
         row = self._scalar(f"""
             SELECT round(avg(f.route_rating), 3) AS route, round(avg(f.driver_rating), 3) AS driver,
                    round(avg(f.safety_rating), 3) AS safety, count(f.route_rating) AS n
@@ -164,6 +167,35 @@ class Metrics:
                 [tenant_id]).fetchall()
         return self.con.execute(
             "SELECT metric, tenant_id, value FROM data_quality ORDER BY metric, tenant_id").fetchall()
+
+    # -- generic helpers for C3 (peer ranking & drivers) -----------------------
+
+    def distinct(self, dim, filters=None, month=None):
+        """Distinct values of a whitelisted dimension within a scope."""
+        if dim not in ALLOWED_DIMS:
+            raise ValueError(f"Illegal dimension: {dim}")
+        w, p = self._where(filters, month)
+        rows = self.con.execute(
+            f"SELECT DISTINCT {dim} FROM trips{w} "
+            f"{'AND' if w else 'WHERE'} {dim} IS NOT NULL ORDER BY 1", p).fetchall()
+        return [r[0] for r in rows]
+
+    def kpi_by_group(self, method_name, dim, base_filters=None, month=None, min_n=1):
+        """Compute a KPI for each value of `dim`, calling the C2 method per group.
+
+        Returns list of dicts {group, value, n}. Powers peer ranking and
+        drivers-of-change generically for any registered KPI.
+        """
+        fn = getattr(self, method_name)
+        base = dict(base_filters or {})
+        base.pop(dim, None)  # siblings: rank across all values of `dim`
+        out = []
+        for val in self.distinct(dim, base, month):
+            f = dict(base); f[dim] = val
+            r = fn(f, month)
+            if r.get("value") is not None and (r.get("n") or 0) >= min_n:
+                out.append({"group": val, "value": r["value"], "n": r["n"]})
+        return out
 
     def tenants(self):
         return [r[0] for r in self.con.execute(

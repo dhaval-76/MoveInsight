@@ -41,6 +41,65 @@ VALID_SEVERITIES = {"Sev-1", "Sev-2", "Sev-3"}
 # (so "worst vendor" is not just the smallest-sample one).
 PEER_MIN_TRIPS = 2000
 
+# --- C3 benchmarking / context config -----------------------------------------
+#
+# Registry of every KPI the context engine understands. For each:
+#   method            -> the Metrics method name (C2) that computes it
+#   good              -> "up" or "down": which direction is a GOOD movement
+#                        (OTA up = good; cost / no-show / CO2 / safety down = good)
+#   sla               -> optional target the metric is judged against (None if n/a)
+#   industry_norm     -> configurable market benchmark (stated assumption; None if n/a)
+#   attribution_dim   -> the dimension to decompose "drivers of change" by
+#   label / unit      -> display metadata
+#
+# This is the single place polarity/targets/norms live, so every downstream
+# consumer (badges, briefing, escalation) renders consistently.
+METRIC_REGISTRY = {
+    "ota": {
+        "method": "ota", "good": "up", "sla": DEFAULT_OTA_SLA * 100,
+        "industry_norm": 94.0, "attribution_dim": "vendor",
+        "label": "On-time arrival", "unit": "%",
+    },
+    "noshow_rate": {
+        "method": "noshow_rate", "good": "down", "sla": None,
+        "industry_norm": 6.0, "attribution_dim": "vendor",
+        "label": "No-show rate", "unit": "%",
+    },
+    "cost_per_trip": {
+        "method": "cost_per_trip", "good": "down", "sla": None,
+        "industry_norm": 1300.0, "attribution_dim": "vendor",
+        "label": "Cost per trip", "unit": "INR",
+    },
+    "occupancy": {
+        "method": "occupancy", "good": "up", "sla": None,
+        "industry_norm": 65.0, "attribution_dim": "vendor",
+        "label": "Occupancy", "unit": "%",
+    },
+    "co2_per_trip": {
+        "method": "co2_per_trip", "good": "down", "sla": None,
+        "industry_norm": 2.5, "attribution_dim": "vendor",
+        "label": "CO2 per trip", "unit": "kg",
+    },
+    "safety_score": {
+        "method": "safety_score", "good": "down", "sla": None,
+        "industry_norm": 40.0, "attribution_dim": "office",
+        "label": "Safety alerts", "unit": "per 1k",
+    },
+    "escort_compliance": {
+        "method": "escort_compliance", "good": "up", "sla": 95.0,
+        "industry_norm": 98.0, "attribution_dim": "vendor",
+        "label": "Night-escort compliance", "unit": "%",
+    },
+    "feedback_score": {
+        "method": "feedback_score", "good": "up", "sla": None,
+        "industry_norm": 4.5, "attribution_dim": "vendor",
+        "label": "Experience rating", "unit": "1-5",
+    },
+}
+
+# Months present in the dataset, oldest -> newest (for trend defaults).
+DATA_MONTHS = ["2026-05", "2026-06", "2026-07"]
+
 # Path to the persistent DuckDB file.
 DB_PATH = "mobility.duckdb"
 
