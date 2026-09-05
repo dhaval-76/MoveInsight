@@ -22,6 +22,32 @@ python -m pip install --upgrade pip
 pip install -r backend/requirements.txt
 ```
 
+## Run the context API
+
+```bash
+source backend/.venv/bin/activate
+uvicorn backend.api:app --reload
+```
+
+DuckDB allows the API to read the database only when another application does
+not hold a write lock. Close the `mobility.duckdb` connection in DBeaver (or
+other database clients) before starting Uvicorn. If the lock error mentions a
+stale client process, fully quit that client and start Uvicorn again.
+
+The API exposes one endpoint, `POST /context`:
+
+```json
+{
+  "method": "ota",
+  "filters": {"tenant_id": "pinnacle-Slc"},
+  "month": "2026-07"
+}
+```
+
+The response is the full context object produced by `ContextEngine`, including
+the current value, sample size, trend, SLA, peer comparison, industry norm,
+drivers of change, assessment, and headline.
+
 ## Build the database (from the repo root, where the CSVs live)
 
 ```bash
