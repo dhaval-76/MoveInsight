@@ -256,14 +256,18 @@ class AgentOrchestrator:
                 base_url=C.GROQ_BASE_URL,
                 timeout=30.0,
             )
-            response = client.chat.completions.create(
-                model=C.GROQ_MODEL,
-                messages=[
+            if "prompt-guard" in C.GROQ_MODEL.lower():
+                messages = [{"role": "user", "content": f"{system_prompt}\n{prompt}"}]
+            else:
+                messages = [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
-                ],
+                ]
+            response = client.chat.completions.create(
+                model=C.GROQ_MODEL,
+                messages=messages,
                 temperature=0.3,
-                max_tokens=600,
+                max_tokens=256,
             )
             return response.choices[0].message.content.strip()
         except Exception as exc:

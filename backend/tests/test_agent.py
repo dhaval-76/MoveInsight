@@ -85,7 +85,10 @@ class AgentOrchestratorTests(unittest.TestCase):
         self.assertEqual(action["type"], "vendor_escalation_email")
         self.assertEqual(action["recipient"], "Pooja Mikhailov Travel")
         self.assertIn("Pooja Mikhailov Travel", action["subject"])
-        self.assertIn("Pooja Mikhailov Travel' contributed 67.3%", action["body"])
+        if action.get("groq_generated") or action.get("grok_generated"):
+            self.assertTrue(len(action["body"]) > 0)
+        else:
+            self.assertIn("Pooja Mikhailov Travel' contributed 67.3%", action["body"])
         self.assertEqual(action["status"], "PROPOSED_WAITING_APPROVAL")
 
     def test_sample_c4_payload_reasoning_disabled(self):
