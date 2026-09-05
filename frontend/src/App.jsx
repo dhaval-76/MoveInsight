@@ -168,10 +168,17 @@ function App() {
         `${selectedAlert.root_cause.top_driver_label} is the leading contributor.`
       : "No additional root-cause detail was recorded."
     : "";
+  const anomalyEvidence = selectedAlert?.context?.anomaly || {};
+  const alertGroup = anomalyEvidence.group || {};
+  const alertContext = anomalyEvidence.context || {};
+  const reasoningTrace = selectedAlert?.context?.agent?.reasoning_trace || [];
+  const otaReasoning = selectedAlert?.context?.agent?.ota_reasoning;
   const actionDraft = selectedAlert?.context?.agent?.action_draft;
   const recommendedActions =
     selectedAlert?.recommended_actions?.length ?
       selectedAlert.recommended_actions
+    : otaReasoning?.recommended_next_step ?
+      [otaReasoning.recommended_next_step]
     : actionDraft ?
       [
         `Route ${actionDraft.type.replaceAll("_", " ")} to ${actionDraft.recipient}.`,
@@ -333,6 +340,26 @@ function App() {
 
               <h3>{selectedAlert.title}</h3>
               <p className='detail-tenant'>{selectedAlert.tenant_id}</p>
+              {alertGroup.name && (
+                <div className='evidence-grid'>
+                  <div>
+                    <span className='evidence-label'>Group</span>
+                    <strong>{alertGroup.dimension}: {alertGroup.name}</strong>
+                  </div>
+                  <div>
+                    <span className='evidence-label'>Observed</span>
+                    <strong>{alertGroup.value ?? alertContext.value}%</strong>
+                  </div>
+                  <div>
+                    <span className='evidence-label'>SLA gap</span>
+                    <strong>{alertGroup.sla_gap_pts ?? alertContext.sla?.gap_pts} pts</strong>
+                  </div>
+                  <div>
+                    <span className='evidence-label'>Confidence</span>
+                    <strong>{anomalyEvidence.confidence || "normal"}</strong>
+                  </div>
+                </div>
+              )}
               <p>{selectedAlert.summary}</p>
 
               <div className='status-actions'>
@@ -358,6 +385,22 @@ function App() {
                 <h4>Root cause</h4>
                 <p>{rootCauseText}</p>
               </div>
+
+              {(otaReasoning || reasoningTrace.length > 0) && (
+                <div className='detail-section'>
+                  <h4>C5 reasoning</h4>
+                  {otaReasoning ?
+                    <>
+                      <p>{otaReasoning.reasoning_summary || otaReasoning.narrative}</p>
+                      {otaReasoning.confidence_note && <p className='muted'>{otaReasoning.confidence_note}</p>}
+                    </>
+                  : <ul>
+                      {reasoningTrace.map(step => (
+                        <li key={`${step.step}-${step.detail}`}>{step.detail}</li>
+                      ))}
+                    </ul>}
+                </div>
+              )}
 
               <div className='detail-section'>
                 <h4>Recommended actions</h4>

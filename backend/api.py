@@ -13,6 +13,7 @@ from .alerts import AlertStore
 from .context import ContextEngine
 from .insights import InsightEngine
 from .metrics import Metrics
+from .ota_agent import AgentConfigurationError, AgentProviderError, OtaReasoningAgent
 
 
 class ContextRequest(BaseModel):
@@ -95,6 +96,7 @@ _context_engine = ContextEngine(_metrics)
 _insight_engine = InsightEngine(_context_engine)
 _agent_orchestrator = AgentOrchestrator(_context_engine, _insight_engine)
 _alert_store = AlertStore(_db_path)
+_ota_reasoning_agent = OtaReasoningAgent()
 
 
 @app.post("/context")
@@ -174,18 +176,19 @@ def reason_about_ota(request: ContextRequest) -> dict:
         insights = _insight_engine.evaluate_context(context)
         if not isinstance(insights, list):
             insights = [insights] if insights.get("is_anomaly") else []
-        results = [
-            _agent_orchestrator.process_anomaly(insight, enable_reasoning=True)
-            for insight in insights
-        ]
+        reasoning = _ota_reasoning_agent.reason_many(insights)
         return {
             "agent": "ota_reasoning",
-            "status": "anomaly" if insights else "not_anomaly",
+            "status": reasoning["status"],
             "period": context.get("period"),
             "grain": context.get("grain"),
             "c4_alerts": insights,
-            "c5_results": results,
+            "total_alerts": reasoning["total_alerts"],
+            "results": reasoning["results"],
+            "source": reasoning["source"],
         }
+    except (AgentConfigurationError, AgentProviderError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -257,12 +260,27 @@ def run_alert_pipeline(request: AlertRunRequest) -> dict:
             tenant_id=None,
             dimensions=[],
         )
+        ota_anomalies = [anomaly for anomaly in anomalies if anomaly.get("kpi") == "ota"]
+        ota_reasoning = None
+        if ota_anomalies and request.enable_reasoning:
+            try:
+                ota_reasoning = _ota_reasoning_agent.reason_many(ota_anomalies)
+            except (AgentConfigurationError, AgentProviderError):
+                ota_reasoning = None
         saved = []
         for anomaly in anomalies:
             result = _agent_orchestrator.process_anomaly(
                 anomaly,
-                enable_reasoning=request.enable_reasoning,
+                enable_reasoning=(
+                    False if ota_reasoning and anomaly.get("kpi") == "ota"
+                    else request.enable_reasoning
+                ),
             )
+            if ota_reasoning:
+                result["ota_reasoning"] = next(
+                    (item for item in ota_reasoning["results"] if item["insight_id"] == anomaly.get("insight_id")),
+                    None,
+                )
             saved.append(_alert_store.save_alert(run_id, anomaly, result))
 
         summary = {"alerts_saved": len(saved), "tenants": sorted({item["tenant_id"] for item in saved})}

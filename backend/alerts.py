@@ -89,7 +89,11 @@ class AlertStore:
         period = context.get("period") or context.get("month") or "unknown"
         grain = context.get("grain", "month")
         priority_band = anomaly.get("priority_band", "low")
-        title = f"{context.get('label', kpi)} alert for {tenant_id}"
+        group = anomaly.get("group") or {}
+        group_label = group.get("name")
+        title = f"{context.get('label', kpi)} alert for {group_label or tenant_id}"
+        if group_label and group.get("dimension"):
+            title = f"{context.get('label', kpi)} alert for {group.get('dimension')} {group_label}"
         summary = agent_result.get("executive_summary") or anomaly.get("summary", "")
         action_draft = agent_result.get("action_draft") or {}
         actions = action_draft.get("actions") or action_draft.get("recommended_actions") or []
