@@ -254,6 +254,7 @@ class AgentOrchestrator:
             client = openai.OpenAI(
                 api_key=api_key,
                 base_url=C.GROQ_BASE_URL,
+                timeout=30.0,
             )
             response = client.chat.completions.create(
                 model=C.GROQ_MODEL,
