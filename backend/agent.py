@@ -4,6 +4,10 @@ Consumes C4 anomaly insights and natural language queries, executes the
 orchestration loop, routes to target personas, and generates pre-filled
 action payloads and executive narratives.
 
+Decoupled from C3: C5 processes C4 anomaly insights directly from the
+self-contained C4 insight JSON payload (which embeds the full context,
+SLA targets, trend, peer percentiles, and driver attributions).
+
 Supports Grok (xAI API) for LLM reasoning and executive narration, with
 graceful deterministic fallback when offline or without an API key.
 
@@ -21,18 +25,20 @@ from typing import Optional
 from . import config as C
 from .context import ContextEngine
 from .insights import InsightEngine
+from .metrics import Metrics
 
 logger = logging.getLogger(__name__)
 
 
 class AgentOrchestrator:
-    def __init__(self, context_engine: ContextEngine,
+    def __init__(self, context_engine: Optional[ContextEngine] = None,
                  insight_engine: Optional[InsightEngine] = None,
+                 metrics: Optional[Metrics] = None,
                  enable_reasoning: Optional[bool] = None,
                  grok_api_key: Optional[str] = None):
         self.context_engine = context_engine
-        self.metrics = context_engine.m
-        self.insight_engine = insight_engine or InsightEngine(context_engine)
+        self.metrics = metrics or (context_engine.m if context_engine else None)
+        self.insight_engine = insight_engine or (InsightEngine(context_engine) if context_engine else None)
         self.default_enable_reasoning = (
             enable_reasoning if enable_reasoning is not None else C.ENABLE_REASONING
         )
@@ -41,7 +47,12 @@ class AgentOrchestrator:
     def process_anomaly(self, insight: dict,
                         enable_reasoning: Optional[bool] = None,
                         grok_api_key: Optional[str] = None) -> dict:
-        """Process one C4 anomaly insight payload into an AgentResponse."""
+        """Process one self-contained C4 anomaly insight payload into an AgentResponse.
+
+        Does NOT depend on C3: all context, signals, priority scores, SLA targets,
+        trend deltas, peer ranks, and driver attributions are read directly from
+        the C4 insight payload.
+        """
         reasoning_on = (
             enable_reasoning if enable_reasoning is not None else self.default_enable_reasoning
         )
@@ -97,6 +108,8 @@ class AgentOrchestrator:
                          enable_reasoning: Optional[bool] = None,
                          grok_api_key: Optional[str] = None) -> list[dict]:
         """Scan a period for anomalies via C4 and process each through C5."""
+        if not self.insight_engine:
+            raise ValueError("InsightEngine is required to perform period scan.")
         anomalies = self.insight_engine.scan_period(period, grain=grain, tenant_id=tenant_id)
         results = []
         for anomaly in anomalies:
@@ -119,13 +132,18 @@ class AgentOrchestrator:
                 kpi_target = candidate_kpi
                 break
 
-        ctx = self.context_engine.context(kpi_target, filters=filters, month=month)
-        headline = ctx.get("headline", "")
-        n = ctx.get("n", 0)
+        if self.context_engine:
+            ctx = self.context_engine.context(kpi_target, filters=filters, month=month)
+            headline = ctx.get("headline", "")
+            n = ctx.get("n", 0)
+        else:
+            ctx = {"kpi": kpi_target, "value": None, "n": 0}
+            headline = f"KPI '{kpi_target}' query processed"
+            n = 0
 
         trace = [
             {"step": "INTENT_PARSING", "detail": f"Mapped query to KPI '{kpi_target}'"},
-            {"step": "FETCH_CONTEXT", "detail": f"Retrieved deterministic C3 context for scope {filters}"},
+            {"step": "FETCH_CONTEXT", "detail": f"Retrieved context for scope {filters}"},
         ]
 
         grok_explanation = None
@@ -197,6 +215,7 @@ class AgentOrchestrator:
             "signals": [s.get("name") for s in insight.get("signals", [])],
         })
 
+        # All driver attribution comes directly from C4 insight payload's embedded context
         drivers = ctx.get("drivers_of_change", [])
         if drivers:
             top_driver = drivers[0]
@@ -244,7 +263,7 @@ class AgentOrchestrator:
             "detail": f"Selected target personas: {', '.join(personas)} based on {priority_band} severity.",
         })
 
-        # Step 5: Optional Grok LLM Reasoning Layer
+        # Grok LLM Reasoning Layer
         if grok_key:
             grok_prompt = (
                 f"Analyze this operational anomaly in enterprise mobility:\n"
@@ -271,6 +290,8 @@ class AgentOrchestrator:
         return trace, root_cause
 
     def _query_delay_reasons(self, filters: dict, month: str | None) -> list[tuple[str, int]]:
+        if not self.metrics:
+            return [("DRIVER", 0)]
         try:
             w, p = self.metrics._where(filters, month)
             sql = f"""
@@ -284,6 +305,8 @@ class AgentOrchestrator:
             return [("DRIVER", 0)]
 
     def _query_safety_alert_types(self, filters: dict, month: str | None) -> list[tuple[str, int]]:
+        if not self.metrics:
+            return [("PANIC_DEVICE", 0)]
         try:
             wa, pa = self.metrics._where(filters, month, alias="t")
             sql = f"""
@@ -317,7 +340,6 @@ class AgentOrchestrator:
         else:
             reason_detail = f"Metric {ctx.get('label')} is currently {value}{unit} over {n:,} trips."
 
-        # If Grok is available, generate a professional vendor escalation body using Grok
         grok_body = None
         if grok_key:
             prompt = (
