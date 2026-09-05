@@ -50,9 +50,17 @@ Primary endpoint — `POST /context`:
 {
   "method": "ota",
   "filters": {"tenant_id": "pinnacle-Slc"},
-  "month": "2026-07"
+  "period": "2026-07",
+  "grain": "month"
 }
 ```
+
+`grain` can be `month`, `week`, or `day`; use a matching period such as
+`2026-07`, `2026-W29`, or `2026-07-15`.
+
+Only `method` is required. `filters` and `period` are optional; when omitted,
+the context engine uses the full data scope and its latest available period.
+`grain` is optional and defaults to `month`.
 
 The response is the full context object produced by `ContextEngine` — value,
 sample size, trend, SLA, peer comparison, industry norm, drivers of change,

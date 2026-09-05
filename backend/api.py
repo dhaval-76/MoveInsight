@@ -1,5 +1,6 @@
 """HTTP API for the MoveInsight context engine."""
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -9,11 +10,15 @@ from .metrics import Metrics
 
 
 class ContextRequest(BaseModel):
-    """Scope used to build one KPI context response."""
+    """KPI scope and time grain used to build one context response."""
 
     method: str = Field(min_length=1, description="Registered KPI method, for example ota")
-    filters: dict[str, str] = Field(default_factory=dict)
-    month: str = Field(pattern=r"^\d{4}-\d{2}$")
+    filters: dict[str, str] | None = None
+    period: str | None = Field(
+        default=None,
+        description="Focus bucket: YYYY-MM, YYYY-Www, or YYYY-MM-DD",
+    )
+    grain: Literal["month", "week", "day"] = "month"
 
 
 app = FastAPI(title="MoveInsight Context API", version="1.0.0")
@@ -28,7 +33,8 @@ def get_context(request: ContextRequest) -> dict:
         return _context_engine.context(
             request.method,
             request.filters,
-            request.month,
+            request.period,
+            request.grain,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
