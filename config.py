@@ -1,0 +1,64 @@
+"""Config: SLA targets, thresholds, emission factors.
+
+These are NOT in the dataset — they are supplied here with stated assumptions,
+per HLD §2.4. Editable per tenant/vendor.
+"""
+
+# On-time-arrival threshold: a trip is "on time" if delay <= this many minutes.
+OTA_THRESHOLD_MIN = 10
+
+# Default SLA target for OTA (fraction). Overridable per tenant/vendor below.
+DEFAULT_OTA_SLA = 0.90
+
+# Per-tenant SLA overrides (business_unit -> ota target). Assumption: same 90%
+# unless a specific enterprise contract says otherwise.
+TENANT_OTA_SLA = {
+    # "pinnacle-Slc": 0.92,
+}
+
+# CO2 emission factors (kg CO2 per km) by fuel type. Stated assumptions —
+# rough public averages for a shared 4-seater; adjust with real factors.
+EMISSION_KG_PER_KM = {
+    "PETROL": 0.171,
+    "DIESEL": 0.171,
+    "CNG": 0.120,
+    "HYD": 0.120,      # hybrid
+    "HYBRID": 0.120,
+    "EV": 0.050,       # grid-charged EV, upstream emissions
+    "ELECTRIC": 0.050,
+}
+DEFAULT_EMISSION_KG_PER_KM = 0.150
+
+# Cost sanity bounds (INR per trip). Rows outside this are quarantined
+# (dataset has negatives to -2.2M and highs to 104k => credits/adjustments).
+COST_MIN_INR = 0.0
+COST_MAX_INR = 20000.0
+
+# Valid alert severities. Anything else (NA, False, ...) => severity_unknown.
+VALID_SEVERITIES = {"Sev-1", "Sev-2", "Sev-3"}
+
+# Minimum sample size for a vendor/office to appear in peer comparisons
+# (so "worst vendor" is not just the smallest-sample one).
+PEER_MIN_TRIPS = 2000
+
+# Path to the persistent DuckDB file.
+DB_PATH = "mobility.duckdb"
+
+# Data directory (where the raw CSVs live).
+import os
+DATA_DIR = os.environ.get(
+    "MOVEINSYNC_DATA_DIR",
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+)
+
+# Raw file names (the thin adapter: change these + the column map in ingest.py
+# if the real schema shifts).
+TRIP_FILES = [
+    "Ride_data _trip-may_2026.csv",
+    "Ride_data _trip-June_2026.csv",
+    "Ride_data _trip-July_2026.csv",
+]
+EMP_FILE = "emp_Data.csv"
+BILL_FILE = "bill_data.csv"
+FEEDBACK_FILE = "trip_feedback.csv"
+ALERTS_FILE = "alerts_data.csv"
